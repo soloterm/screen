@@ -123,6 +123,9 @@ class PrintableBuffer extends Buffer
         // The remainder is the unprocessed units joined back into a string.
         $remainder = implode('', array_slice($units, $i));
 
+        // Mark this row as modified for differential rendering
+        $this->markLineDirty($row);
+
         return [$advanceCursor, $remainder];
     }
 
