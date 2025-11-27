@@ -18,11 +18,83 @@ class Buffer implements ArrayAccess
 
     protected mixed $valueForClearing = 0;
 
+    /**
+     * Tracks the sequence number when each line was last modified.
+     * Used for differential rendering - only lines with seqNo > lastRendered need re-rendering.
+     *
+     * @var array<int, int>
+     */
+    protected array $lineSeqNos = [];
+
+    /**
+     * Reference to the parent screen's sequence counter.
+     * Set via setSeqNoProvider() to avoid circular dependencies.
+     *
+     * @var callable|null
+     */
+    protected $seqNoProvider = null;
+
     public function __construct(public int $max = 5000)
     {
         if (method_exists($this, 'initialize')) {
             $this->initialize();
         }
+    }
+
+    /**
+     * Set a callback that returns the current sequence number.
+     */
+    public function setSeqNoProvider(callable $provider): static
+    {
+        $this->seqNoProvider = $provider;
+
+        return $this;
+    }
+
+    /**
+     * Mark a line as dirty (modified) with the current sequence number.
+     */
+    public function markLineDirty(int $row): void
+    {
+        if ($this->seqNoProvider !== null) {
+            $this->lineSeqNos[$row] = ($this->seqNoProvider)();
+        }
+    }
+
+    /**
+     * Check if a line has changed since the given sequence number.
+     */
+    public function lineChangedSince(int $row, int $seqNo): bool
+    {
+        return ($this->lineSeqNos[$row] ?? 0) > $seqNo;
+    }
+
+    /**
+     * Get all rows that have changed since the given sequence number.
+     *
+     * @return array<int> Row indices that have changed
+     */
+    public function getChangedRows(int $sinceSeqNo): array
+    {
+        $changed = [];
+
+        foreach ($this->lineSeqNos as $row => $rowSeqNo) {
+            if ($rowSeqNo > $sinceSeqNo) {
+                $changed[] = $row;
+            }
+        }
+
+        sort($changed);
+
+        return $changed;
+    }
+
+    /**
+     * Get the maximum sequence number across all lines.
+     */
+    public function getMaxSeqNo(): int
+    {
+        return empty($this->lineSeqNos) ? 0 : max($this->lineSeqNos);
     }
 
     public function getBuffer()
@@ -38,6 +110,10 @@ class Buffer implements ArrayAccess
     ): void {
         // Short-circuit if we're clearing the whole buffer.
         if ($startRow === 0 && $startCol === 0 && $endRow === PHP_INT_MAX && $endCol === PHP_INT_MAX) {
+            // Mark all existing rows as dirty before clearing
+            foreach (array_keys($this->buffer) as $row) {
+                $this->markLineDirty($row);
+            }
             $this->buffer = [];
 
             return;
@@ -66,6 +142,9 @@ class Buffer implements ArrayAccess
                 // Clearing the middle of a row. Fill with the replacement value.
                 $this->fill($this->valueForClearing, $row, $cols[0], $cols[1]);
             }
+
+            // Mark this row as dirty
+            $this->markLineDirty($row);
         }
     }
 
@@ -86,6 +165,7 @@ class Buffer implements ArrayAccess
             $line, array_fill_keys(range($startCol, $endCol), $value)
         );
 
+        $this->markLineDirty($row);
         $this->trim();
     }
 
@@ -146,11 +226,13 @@ class Buffer implements ArrayAccess
     public function offsetSet(mixed $offset, mixed $value): void
     {
         if (is_null($offset)) {
+            $offset = count($this->buffer);
             $this->buffer[] = $value;
         } else {
             $this->buffer[$offset] = $value;
         }
 
+        $this->markLineDirty($offset);
         $this->trim();
     }
 

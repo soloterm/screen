@@ -13,8 +13,10 @@ use Closure;
 use Exception;
 use SoloTerm\Screen\Buffers\AnsiBuffer;
 use SoloTerm\Screen\Buffers\Buffer;
+use SoloTerm\Screen\Buffers\CellBuffer;
 use SoloTerm\Screen\Buffers\PrintableBuffer;
 use SoloTerm\Screen\Buffers\Proxy;
+use Stringable;
 
 class Screen
 {
@@ -38,6 +40,18 @@ class Screen
 
     protected array $stashedCursor = [];
 
+    /**
+     * Monotonically increasing sequence number. Incremented on each buffer modification.
+     * Used for differential rendering to track which lines have changed.
+     */
+    protected int $seqNo = 0;
+
+    /**
+     * The sequence number at which output() was last called.
+     * Used to determine which lines need re-rendering.
+     */
+    protected int $lastRenderedSeqNo = 0;
+
     public function __construct(int $width, int $height)
     {
         $this->width = $width;
@@ -49,6 +63,27 @@ class Screen
             $this->ansi,
             $this->printable
         ]);
+
+        // Wire up sequence number provider to both buffers
+        $seqNoProvider = fn() => ++$this->seqNo;
+        $this->ansi->setSeqNoProvider($seqNoProvider);
+        $this->printable->setSeqNoProvider($seqNoProvider);
+    }
+
+    /**
+     * Get the current sequence number.
+     */
+    public function getSeqNo(): int
+    {
+        return $this->seqNo;
+    }
+
+    /**
+     * Get the sequence number at which output() was last called.
+     */
+    public function getLastRenderedSeqNo(): int
+    {
+        return $this->lastRenderedSeqNo;
     }
 
     public function respondToQueriesVia(Closure $closure): static
@@ -58,25 +93,180 @@ class Screen
         return $this;
     }
 
-    public function output(): string
+    /**
+     * Generate output string from the screen buffer.
+     *
+     * When $sinceSeqNo is null (default), outputs all lines joined by newlines.
+     * This is the original behavior for full screen rendering.
+     *
+     * When $sinceSeqNo is provided, only outputs lines that have changed since
+     * that sequence number, with cursor positioning for each changed line.
+     * This enables differential rendering for significant performance gains.
+     *
+     * @param  int|null  $sinceSeqNo  Only render lines changed after this sequence number
+     * @return string The rendered output
+     */
+    public function output(?int $sinceSeqNo = null): string
     {
+        // Update last rendered sequence number
+        $this->lastRenderedSeqNo = $this->seqNo;
+
+        // Differential rendering mode - optimized path
+        if ($sinceSeqNo !== null) {
+            return $this->outputDifferential($sinceSeqNo);
+        }
+
+        // Full rendering mode (original behavior)
         $ansi = $this->ansi->compressedAnsiBuffer();
         $printable = $this->printable->getBuffer();
+
+        return $this->outputFull($ansi, $printable);
+    }
+
+    /**
+     * Render all lines, joined by newlines. Original output behavior.
+     */
+    protected function outputFull(array $ansi, array $printable): string
+    {
         $outputLines = [];
 
         foreach ($printable as $lineIndex => $line) {
-            // Get ANSI codes for this line (if any).
-            $ansiForLine = $ansi[$lineIndex] ?? [];
-            $lineStr = '';
-
-            for ($col = 0; $col < count($line); $col++) {
-                $lineStr .= ($ansiForLine[$col] ?? '') . $line[$col];
-            }
-
-            $outputLines[] = $lineStr;
+            $outputLines[] = $this->renderLine($lineIndex, $line, $ansi[$lineIndex] ?? []);
         }
 
         return implode(PHP_EOL, $outputLines);
+    }
+
+    /**
+     * Render only lines that changed since the given sequence number.
+     * Each line is prefixed with a cursor positioning escape sequence.
+     *
+     * This method is optimized to only process changed rows, avoiding
+     * the O(rows × cols) cost of processing the entire buffer.
+     */
+    protected function outputDifferential(int $sinceSeqNo): string
+    {
+        // Get changed rows from the printable buffer (which tracks all writes)
+        $changedRows = $this->printable->getChangedRows($sinceSeqNo);
+
+        // Early return if nothing changed
+        if (empty($changedRows)) {
+            return '';
+        }
+
+        $parts = [];
+        $printable = $this->printable->getBuffer();
+
+        // Only compute ANSI for changed rows
+        foreach ($changedRows as $lineIndex) {
+            // Skip rows that don't exist in the buffer
+            if (!isset($printable[$lineIndex])) {
+                continue;
+            }
+
+            // Calculate visible row (1-based, accounting for scroll offset)
+            $visibleRow = $lineIndex - $this->linesOffScreen + 1;
+
+            // Skip rows that are scrolled off screen
+            if ($visibleRow < 1 || $visibleRow > $this->height) {
+                continue;
+            }
+
+            $line = $printable[$lineIndex];
+
+            // Compute compressed ANSI only for this specific line
+            $ansiForLine = $this->compressAnsiForLine($lineIndex);
+
+            // Position cursor at start of this line, then render
+            $parts[] = "\033[{$visibleRow};1H";
+            $parts[] = $this->renderLine($lineIndex, $line, $ansiForLine);
+            // Clear to end of line to handle shortened content
+            $parts[] = "\033[K";
+        }
+
+        return implode('', $parts);
+    }
+
+    /**
+     * Compute compressed ANSI codes for a single line.
+     * This is an optimized version of compressedAnsiBuffer() for one row.
+     */
+    protected function compressAnsiForLine(int $lineIndex): array
+    {
+        $line = $this->ansi->buffer[$lineIndex] ?? [];
+
+        if (empty($line)) {
+            return [];
+        }
+
+        // Reset on each line for safety (in case previous lines aren't visible)
+        $previousCell = [0, null, null];
+
+        return array_filter(array_map(function ($cell) use (&$previousCell) {
+            if (is_int($cell)) {
+                $cell = [$cell, null, null];
+            }
+
+            $uniqueBits = $cell[0] & ~$previousCell[0];
+            $turnedOffBits = $previousCell[0] & ~$cell[0];
+
+            $resetCodes = [];
+            $turnedOffCodes = $this->ansi->ansiCodesFromBits($turnedOffBits);
+
+            foreach ($turnedOffCodes as $code) {
+                if ($code >= 30 && $code <= 39 || $code >= 90 && $code <= 97) {
+                    $resetCodes[] = 39;
+                } elseif ($code >= 40 && $code <= 49 || $code >= 100 && $code <= 107) {
+                    $resetCodes[] = 49;
+                } elseif ($code >= 1 && $code <= 9) {
+                    // Map decoration codes to their resets
+                    $decorationResets = [1 => 22, 2 => 22, 3 => 23, 4 => 24, 5 => 25, 7 => 27, 8 => 28, 9 => 29];
+                    if (isset($decorationResets[$code])) {
+                        $resetCodes[] = $decorationResets[$code];
+                    }
+                }
+            }
+
+            $uniqueCodes = $this->ansi->ansiCodesFromBits($uniqueBits);
+
+            // Extended foreground changed
+            if ($previousCell[1] !== $cell[1]) {
+                if ($previousCell[1] !== null && $cell[1] === null) {
+                    $resetCodes[] = 39;
+                } elseif ($cell[1] !== null) {
+                    $uniqueCodes[] = implode(';', [38, ...$cell[1]]);
+                }
+            }
+
+            // Extended background changed
+            if ($previousCell[2] !== $cell[2]) {
+                if ($previousCell[2] !== null && $cell[2] === null) {
+                    $resetCodes[] = 49;
+                } elseif ($cell[2] !== null) {
+                    $uniqueCodes[] = implode(';', [48, ...$cell[2]]);
+                }
+            }
+
+            $previousCell = $cell;
+
+            $allCodes = array_unique(array_merge($resetCodes, $uniqueCodes));
+
+            return count($allCodes) ? ("\e[" . implode(';', $allCodes) . 'm') : '';
+        }, $line));
+    }
+
+    /**
+     * Render a single line by merging printable characters with ANSI codes.
+     */
+    protected function renderLine(int $lineIndex, array $line, array $ansiForLine): string
+    {
+        $lineStr = '';
+
+        for ($col = 0; $col < count($line); $col++) {
+            $lineStr .= ($ansiForLine[$col] ?? '') . $line[$col];
+        }
+
+        return $lineStr;
     }
 
     public function write(string $content): static
@@ -89,12 +279,14 @@ class Screen
             subject: $content
         );
 
-        // Split the line by ANSI codes. Each item in the resulting array
-        // will be a set of printable characters or an ANSI code.
-        $parts = AnsiMatcher::split($content);
+        // Split the line by ANSI codes using the fast state machine parser.
+        // Each item in the resulting array will be a set of printable characters
+        // or a ParsedAnsi object.
+        $parts = AnsiParser::parseFast($content);
 
         foreach ($parts as $part) {
-            if ($part instanceof AnsiMatch) {
+            if ($part instanceof Stringable) {
+                // ParsedAnsi or AnsiMatch object
                 if ($part->command) {
                     $this->handleAnsiCode($part);
                 }
@@ -128,7 +320,12 @@ class Screen
         }
     }
 
-    protected function handleAnsiCode(AnsiMatch $ansi)
+    /**
+     * Handle an ANSI escape code.
+     *
+     * @param  AnsiMatch|ParsedAnsi  $ansi  The parsed ANSI sequence
+     */
+    protected function handleAnsiCode(AnsiMatch|ParsedAnsi $ansi)
     {
         $command = $ansi->command;
         $param = $ansi->params;
@@ -219,6 +416,8 @@ class Screen
     {
         if (($this->cursorRow - $this->linesOffScreen) >= $this->height - 1) {
             $this->linesOffScreen++;
+            // Mark all visible rows dirty since their visual positions changed
+            $this->markVisibleRowsDirty();
         }
 
         $this->moveCursorRow(relative: 1);
@@ -447,6 +646,23 @@ class Screen
             array_splice($this->printable->buffer, -$chop);
             array_splice($this->ansi->buffer, -$chop);
         }
+
+        // Mark all visible rows as dirty since insert/scroll affects them all
+        $this->markVisibleRowsDirty();
+    }
+
+    /**
+     * Mark all rows in the visible area as dirty.
+     * Used after scroll/insert operations that shift content.
+     */
+    protected function markVisibleRowsDirty(): void
+    {
+        $startRow = $this->linesOffScreen;
+        $endRow = $this->linesOffScreen + $this->height;
+
+        for ($row = $startRow; $row < $endRow; $row++) {
+            $this->printable->markLineDirty($row);
+        }
     }
 
     protected function handleScrollDown(int $param): void
@@ -527,5 +743,113 @@ class Screen
         if ($response) {
             call_user_func($this->respondVia, $response);
         }
+    }
+
+    /**
+     * Convert the visible portion of the screen to a CellBuffer.
+     *
+     * This enables value-based comparison between frames for
+     * differential rendering, comparing actual cell content
+     * rather than just tracking which cells were written.
+     *
+     * @param  CellBuffer|null  $targetBuffer  Optional existing buffer to write into
+     * @return CellBuffer The buffer containing the visible screen content
+     */
+    public function toCellBuffer(?CellBuffer $targetBuffer = null): CellBuffer
+    {
+        $buffer = $targetBuffer ?? new CellBuffer($this->width, $this->height);
+        $printable = $this->printable->getBuffer();
+
+        // Only convert the visible portion of the screen
+        for ($row = 0; $row < $this->height; $row++) {
+            $bufferRow = $row + $this->linesOffScreen;
+
+            $printableLine = $printable[$bufferRow] ?? [];
+            $ansiLine = $this->ansi->buffer[$bufferRow] ?? [];
+
+            for ($col = 0; $col < $this->width; $col++) {
+                $char = $printableLine[$col] ?? ' ';
+
+                // Get raw ANSI cell data
+                $ansiCell = $ansiLine[$col] ?? 0;
+
+                // Parse the ANSI cell
+                if (is_int($ansiCell)) {
+                    $bits = $ansiCell;
+                    $extFg = null;
+                    $extBg = null;
+                } else {
+                    $bits = $ansiCell[0] ?? 0;
+                    $extFg = $ansiCell[1] ?? null;
+                    $extBg = $ansiCell[2] ?? null;
+                }
+
+                // Convert to Cell - extract style, fg, bg from the bitmask
+                [$style, $fg, $bg] = $this->extractStyleFromBits($bits);
+
+                $cell = new Cell($char, $style, $fg, $bg, $extFg, $extBg);
+                $buffer->setCell($row, $col, $cell);
+            }
+        }
+
+        return $buffer;
+    }
+
+    /**
+     * Extract Cell-compatible style, foreground, and background from AnsiBuffer bitmask.
+     *
+     * @param  int  $bits  The AnsiBuffer bitmask
+     * @return array{int, int|null, int|null} [style, fg, bg]
+     */
+    protected function extractStyleFromBits(int $bits): array
+    {
+        // The AnsiBuffer assigns bits to codes in the order they're added to $supported:
+        // 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 22-29, 30-39, 40-49, 90-97, 100-107
+        // Each gets a sequential bit (1, 2, 4, 8, 16, ...)
+
+        $style = 0;
+        $fg = null;
+        $bg = null;
+
+        // Build the code-to-bit mapping (matching AnsiBuffer::initialize)
+        $supported = [
+            0, // bit 0 (value 1)
+            1, 2, 3, 4, 5, 6, 7, 8, 9, // bits 1-9 (values 2, 4, 8, ...)
+            22, 23, 24, 25, 26, 27, 28, 29, // decoration resets
+            30, 31, 32, 33, 34, 35, 36, 37, 38, 39, // foreground
+            40, 41, 42, 43, 44, 45, 46, 47, 48, 49, // background
+            90, 91, 92, 93, 94, 95, 96, 97, // bright foreground
+            100, 101, 102, 103, 104, 105, 106, 107, // bright background
+        ];
+
+        $codesBits = [];
+        foreach ($supported as $i => $code) {
+            $codesBits[$code] = 1 << $i;
+        }
+
+        // Extract decoration style (codes 1-9 -> Cell style bits 0-8)
+        for ($code = 1; $code <= 9; $code++) {
+            if (isset($codesBits[$code]) && ($bits & $codesBits[$code])) {
+                $style |= (1 << ($code - 1));
+            }
+        }
+
+        // Extract foreground color (30-37, 90-97)
+        foreach ([...range(30, 37), ...range(90, 97)] as $code) {
+            if (isset($codesBits[$code]) && ($bits & $codesBits[$code])) {
+                $fg = $code;
+                break;
+            }
+        }
+
+        // Extract background color (40-47, 100-107)
+        foreach ([...range(40, 47), ...range(100, 107)] as $code) {
+            if (isset($codesBits[$code]) && ($bits & $codesBits[$code])) {
+                $bg = $code;
+                break;
+            }
+        }
+
+        return [$style, $fg, $bg];
     }
 }
