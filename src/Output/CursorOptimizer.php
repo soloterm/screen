@@ -22,6 +22,7 @@ namespace SoloTerm\Screen\Output;
 class CursorOptimizer
 {
     protected int $currentRow = 0;
+
     protected int $currentCol = 0;
 
     /**
@@ -49,8 +50,8 @@ class CursorOptimizer
     /**
      * Generate the optimal escape sequence to move cursor to target position.
      *
-     * @param int $row Target row (0-indexed)
-     * @param int $col Target column (0-indexed)
+     * @param  int  $row  Target row (0-indexed)
+     * @param  int  $col  Target column (0-indexed)
      * @return string The escape sequence (may be empty if already at position)
      */
     public function moveTo(int $row, int $col): string
@@ -64,18 +65,21 @@ class CursorOptimizer
         if ($row === 0 && $col === 0) {
             $this->currentRow = 0;
             $this->currentCol = 0;
+
             return "\e[H";
         }
 
         // Same row, column 0: carriage return (1 byte)
         if ($row === $this->currentRow && $col === 0) {
             $this->currentCol = 0;
+
             return "\r";
         }
 
         // Down one row, same column: newline (1 byte) - only if at col 0 or we handle it
         if ($row === $this->currentRow + 1 && $col === 0 && $this->currentCol === 0) {
             $this->currentRow++;
+
             return "\n";
         }
 
@@ -110,7 +114,7 @@ class CursorOptimizer
      * Move cursor right by the width of a character just written.
      * Call this after outputting a character to keep tracking accurate.
      *
-     * @param int $width Character width (1 for normal, 2 for wide chars)
+     * @param  int  $width  Character width (1 for normal, 2 for wide chars)
      */
     public function advance(int $width = 1): void
     {
@@ -226,6 +230,6 @@ class CursorOptimizer
     protected function buildAbsoluteMove(int $row, int $col): string
     {
         // ANSI is 1-indexed
-        return "\e[" . ($row + 1) . ";" . ($col + 1) . "H";
+        return "\e[" . ($row + 1) . ';' . ($col + 1) . 'H';
     }
 }

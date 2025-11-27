@@ -232,7 +232,7 @@ class AnsiParserTest extends TestCase
     public function matches_regex_parser_output_for_basic_cases(): void
     {
         $testCases = [
-            "Hello World",
+            'Hello World',
             "\e[31mRed\e[0m",
             "\e[10;20H",
             "\e[1;31;44mStyled\e[0m",
@@ -247,7 +247,7 @@ class AnsiParserTest extends TestCase
             $this->assertCount(
                 count($regexTokens),
                 $stateTokens,
-                "Token count mismatch for: " . json_encode($input)
+                'Token count mismatch for: ' . json_encode($input)
             );
 
             for ($i = 0; $i < count($regexTokens); $i++) {
@@ -281,7 +281,7 @@ class AnsiParserTest extends TestCase
         $input = '';
         for ($i = 0; $i < 100; $i++) {
             $input .= "\e[" . rand(30, 37) . "mLine $i with colored text\e[0m\n";
-            $input .= "\e[" . rand(1, 50) . ";" . rand(1, 100) . "H"; // cursor move
+            $input .= "\e[" . rand(1, 50) . ';' . rand(1, 100) . 'H'; // cursor move
         }
 
         $iterations = 100;
@@ -305,9 +305,9 @@ class AnsiParserTest extends TestCase
         $ratio = $regexMs / $stateMs;
 
         echo "\n\nParser Benchmark ({$iterations} iterations, ~5KB input with 200 ANSI sequences):\n";
-        echo "  Regex:        " . number_format($regexMs, 2) . " ms\n";
-        echo "  State Machine: " . number_format($stateMs, 2) . " ms\n";
-        echo "  Speedup:       " . number_format($ratio, 2) . "x\n";
+        echo '  Regex:        ' . number_format($regexMs, 2) . " ms\n";
+        echo '  State Machine: ' . number_format($stateMs, 2) . " ms\n";
+        echo '  Speedup:       ' . number_format($ratio, 2) . "x\n";
 
         // State machine should be competitive (not necessarily faster due to PHP overhead)
         $this->assertTrue(true);
@@ -357,9 +357,9 @@ class AnsiParserTest extends TestCase
         $stateMs = $stateTime / 1_000_000;
 
         echo "\n\nRealistic Terminal Output Benchmark ({$iterations} iterations):\n";
-        echo "  Regex:        " . number_format($regexMs, 2) . " ms\n";
-        echo "  State Machine: " . number_format($stateMs, 2) . " ms\n";
-        echo "  Speedup:       " . number_format($regexMs / $stateMs, 2) . "x\n";
+        echo '  Regex:        ' . number_format($regexMs, 2) . " ms\n";
+        echo '  State Machine: ' . number_format($stateMs, 2) . " ms\n";
+        echo '  Speedup:       ' . number_format($regexMs / $stateMs, 2) . "x\n";
 
         $this->assertTrue(true);
     }
@@ -412,7 +412,7 @@ class AnsiParserTest extends TestCase
         $input = '';
         for ($i = 0; $i < 100; $i++) {
             $input .= "\e[" . rand(30, 37) . "mLine $i with colored text\e[0m\n";
-            $input .= "\e[" . rand(1, 50) . ";" . rand(1, 100) . "H"; // cursor move
+            $input .= "\e[" . rand(1, 50) . ';' . rand(1, 100) . 'H'; // cursor move
         }
 
         $iterations = 200;
@@ -443,9 +443,9 @@ class AnsiParserTest extends TestCase
         $fastMs = $fastTime / 1_000_000;
 
         echo "\n\nFull Parser Comparison ({$iterations} iterations, ~5KB input):\n";
-        echo "  Regex (AnsiMatcher):       " . number_format($regexMs, 2) . " ms\n";
-        echo "  State + AnsiMatch:         " . number_format($stateMs, 2) . " ms (" . number_format($regexMs / $stateMs, 2) . "x)\n";
-        echo "  State + ParsedAnsi (fast): " . number_format($fastMs, 2) . " ms (" . number_format($regexMs / $fastMs, 2) . "x)\n";
+        echo '  Regex (AnsiMatcher):       ' . number_format($regexMs, 2) . " ms\n";
+        echo '  State + AnsiMatch:         ' . number_format($stateMs, 2) . ' ms (' . number_format($regexMs / $stateMs, 2) . "x)\n";
+        echo '  State + ParsedAnsi (fast): ' . number_format($fastMs, 2) . ' ms (' . number_format($regexMs / $fastMs, 2) . "x)\n";
 
         $this->assertTrue(true);
     }
@@ -490,9 +490,9 @@ class AnsiParserTest extends TestCase
         $fastMs = $fastTime / 1_000_000;
 
         echo "\n\nRealistic Output - Fast Parser ({$iterations} iterations):\n";
-        echo "  Regex:     " . number_format($regexMs, 2) . " ms\n";
-        echo "  Fast:      " . number_format($fastMs, 2) . " ms\n";
-        echo "  Speedup:   " . number_format($regexMs / $fastMs, 2) . "x\n";
+        echo '  Regex:     ' . number_format($regexMs, 2) . " ms\n";
+        echo '  Fast:      ' . number_format($fastMs, 2) . " ms\n";
+        echo '  Speedup:   ' . number_format($regexMs / $fastMs, 2) . "x\n";
 
         // Fast parser should be faster than regex
         $this->assertLessThan($regexMs, $fastMs);
@@ -505,7 +505,7 @@ class AnsiParserTest extends TestCase
         $input = '';
         for ($i = 0; $i < 50; $i++) {
             $input .= "\e[32mLine $i with \e[1mformatted\e[0m \e[33mtext\e[0m\n";
-            $input .= "\e[" . rand(1, 25) . ";" . rand(1, 80) . "H"; // cursor moves
+            $input .= "\e[" . rand(1, 25) . ';' . rand(1, 80) . 'H'; // cursor moves
         }
 
         $iterations = 100;
@@ -521,8 +521,8 @@ class AnsiParserTest extends TestCase
         $writeMs = $writeTime / 1_000_000;
 
         echo "\n\nScreen.write() Performance ({$iterations} iterations, ~3KB ANSI input):\n";
-        echo "  Total time: " . number_format($writeMs, 2) . " ms\n";
-        echo "  Per write:  " . number_format($writeMs / $iterations, 3) . " ms\n";
+        echo '  Total time: ' . number_format($writeMs, 2) . " ms\n";
+        echo '  Per write:  ' . number_format($writeMs / $iterations, 3) . " ms\n";
 
         // Just ensure it completes in reasonable time
         $this->assertLessThan(1000, $writeMs);

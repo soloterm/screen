@@ -400,21 +400,21 @@ class CellBuffer
             $charHash = strlen($cell->char) === 1 ? ord($cell->char) : crc32($cell->char);
 
             // Combine all cell properties into hash using prime multiplier
-            $hash = (($hash * 31) + $charHash) & 0x7fffffff;
-            $hash = (($hash * 31) + $cell->style) & 0x7fffffff;
-            $hash = (($hash * 31) + ($cell->fg ?? -1)) & 0x7fffffff;
-            $hash = (($hash * 31) + ($cell->bg ?? -1)) & 0x7fffffff;
+            $hash = (($hash * 31) + $charHash) & 0x7FFFFFFF;
+            $hash = (($hash * 31) + $cell->style) & 0x7FFFFFFF;
+            $hash = (($hash * 31) + ($cell->fg ?? -1)) & 0x7FFFFFFF;
+            $hash = (($hash * 31) + ($cell->bg ?? -1)) & 0x7FFFFFFF;
 
             // Handle extended colors (RGB)
             if ($cell->extFg) {
-                $hash = (($hash * 31) + $cell->extFg[0]) & 0x7fffffff;
-                $hash = (($hash * 31) + $cell->extFg[1]) & 0x7fffffff;
-                $hash = (($hash * 31) + $cell->extFg[2]) & 0x7fffffff;
+                $hash = (($hash * 31) + $cell->extFg[0]) & 0x7FFFFFFF;
+                $hash = (($hash * 31) + $cell->extFg[1]) & 0x7FFFFFFF;
+                $hash = (($hash * 31) + $cell->extFg[2]) & 0x7FFFFFFF;
             }
             if ($cell->extBg) {
-                $hash = (($hash * 31) + $cell->extBg[0]) & 0x7fffffff;
-                $hash = (($hash * 31) + $cell->extBg[1]) & 0x7fffffff;
-                $hash = (($hash * 31) + $cell->extBg[2]) & 0x7fffffff;
+                $hash = (($hash * 31) + $cell->extBg[0]) & 0x7FFFFFFF;
+                $hash = (($hash * 31) + $cell->extBg[1]) & 0x7FFFFFFF;
+                $hash = (($hash * 31) + $cell->extBg[2]) & 0x7FFFFFFF;
             }
         }
 
@@ -527,6 +527,7 @@ class CellBuffer
                     ];
                 }
             }
+
             return $changed;
         }
 
@@ -554,6 +555,7 @@ class CellBuffer
             if ($a['row'] !== $b['row']) {
                 return $a['row'] - $b['row'];
             }
+
             return $a['col'] - $b['col'];
         });
 
@@ -566,8 +568,8 @@ class CellBuffer
      * Returns ANSI escape sequences that move the cursor and update only changed cells.
      * This is more efficient than re-rendering the entire screen.
      *
-     * @param int $baseRow The base row offset in the terminal (for embedding in larger displays)
-     * @param int $baseCol The base column offset in the terminal
+     * @param  int  $baseRow  The base row offset in the terminal (for embedding in larger displays)
+     * @param  int  $baseCol  The base column offset in the terminal
      * @return string ANSI output for differential update
      */
     public function renderDiff(int $baseRow = 0, int $baseCol = 0): string
@@ -624,8 +626,8 @@ class CellBuffer
      * This method uses CursorOptimizer and StyleTracker to minimize the output size
      * by choosing efficient cursor movements and avoiding redundant style codes.
      *
-     * @param int $baseRow The base row offset in the terminal (for embedding in larger displays)
-     * @param int $baseCol The base column offset in the terminal
+     * @param  int  $baseRow  The base row offset in the terminal (for embedding in larger displays)
+     * @param  int  $baseCol  The base column offset in the terminal
      * @return string Optimized ANSI output for differential update
      */
     public function renderDiffOptimized(int $baseRow = 0, int $baseCol = 0): string
@@ -636,8 +638,8 @@ class CellBuffer
             return '';
         }
 
-        $cursor = new CursorOptimizer();
-        $style = new StyleTracker();
+        $cursor = new CursorOptimizer;
+        $style = new StyleTracker;
         $parts = [];
 
         foreach ($changedCells as $change) {

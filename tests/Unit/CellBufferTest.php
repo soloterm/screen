@@ -555,9 +555,9 @@ class CellBufferTest extends TestCase
         $optimizedBytes = strlen($optimizedOutput);
 
         echo "\n\nDiff Output Comparison ({$iterations} iterations, 8 cell changes):\n";
-        echo "  Basic renderDiff:     " . number_format($basicMs, 2) . " ms, {$basicBytes} bytes\n";
-        echo "  Optimized renderDiff: " . number_format($optimizedMs, 2) . " ms, {$optimizedBytes} bytes\n";
-        echo "  Byte savings:         " . round((1 - $optimizedBytes / $basicBytes) * 100, 1) . "%\n";
+        echo '  Basic renderDiff:     ' . number_format($basicMs, 2) . " ms, {$basicBytes} bytes\n";
+        echo '  Optimized renderDiff: ' . number_format($optimizedMs, 2) . " ms, {$optimizedBytes} bytes\n";
+        echo '  Byte savings:         ' . round((1 - $optimizedBytes / $basicBytes) * 100, 1) . "%\n";
 
         // Optimized should produce smaller output
         $this->assertLessThan($basicBytes, $optimizedBytes);
