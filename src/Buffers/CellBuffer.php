@@ -228,6 +228,9 @@ class CellBuffer
         int $endRow = PHP_INT_MAX,
         int $endCol = PHP_INT_MAX
     ): void {
+        // Clamp all values to valid ranges
+        $startRow = max($startRow, 0);
+        $startCol = max($startCol, 0);
         $endRow = min($endRow, $this->height - 1);
         $endCol = min($endCol, $this->width - 1);
 
@@ -236,8 +239,14 @@ class CellBuffer
                 continue;
             }
 
-            $colStart = ($row === $startRow) ? $startCol : 0;
-            $colEnd = ($row === $endRow) ? $endCol : $this->width - 1;
+            // Compute column range for this row
+            $colStart = max(($row === $startRow) ? $startCol : 0, 0);
+            $colEnd = min(($row === $endRow) ? $endCol : $this->width - 1, $this->width - 1);
+
+            // Skip row if column range is invalid
+            if ($colStart > $colEnd) {
+                continue;
+            }
 
             for ($col = $colStart; $col <= $colEnd; $col++) {
                 $index = $row * $this->width + $col;

@@ -479,6 +479,128 @@ class CellBufferTest extends TestCase
     }
 
     #[Test]
+    public function clear_clamps_negative_start_row(): void
+    {
+        $buffer = new CellBuffer(10, 5);
+
+        // Write content to verify it gets cleared appropriately
+        $buffer->writeChar(0, 0, 'A');
+        $buffer->writeChar(1, 0, 'B');
+
+        // Clear with negative startRow - should clamp to 0 and clear row 0
+        $buffer->clear(-5, 0, 0, 9);
+
+        $this->assertEquals(' ', $buffer->getCell(0, 0)->char,
+            'Row 0 should be cleared when startRow is negative');
+        $this->assertEquals('B', $buffer->getCell(1, 0)->char,
+            'Row 1 should be unchanged');
+    }
+
+    #[Test]
+    public function clear_clamps_negative_start_col(): void
+    {
+        $buffer = new CellBuffer(10, 5);
+
+        // Write content
+        $buffer->writeChar(0, 0, 'A');
+        $buffer->writeChar(0, 1, 'B');
+        $buffer->writeChar(0, 2, 'C');
+
+        // Clear with negative startCol - should clamp to 0
+        $buffer->clear(0, -5, 0, 1);
+
+        $this->assertEquals(' ', $buffer->getCell(0, 0)->char,
+            'Col 0 should be cleared when startCol is negative');
+        $this->assertEquals(' ', $buffer->getCell(0, 1)->char,
+            'Col 1 should be cleared');
+        $this->assertEquals('C', $buffer->getCell(0, 2)->char,
+            'Col 2 should be unchanged');
+    }
+
+    #[Test]
+    public function clear_handles_start_col_greater_than_end_col(): void
+    {
+        $buffer = new CellBuffer(10, 5);
+
+        // Write content
+        $buffer->writeChar(0, 0, 'A');
+        $buffer->writeChar(0, 5, 'B');
+
+        // Clear with startCol > endCol on same row - should skip that row
+        $buffer->clear(0, 8, 0, 3);
+
+        // Nothing should be cleared since startCol > endCol
+        $this->assertEquals('A', $buffer->getCell(0, 0)->char,
+            'Content should be unchanged when startCol > endCol');
+        $this->assertEquals('B', $buffer->getCell(0, 5)->char,
+            'Content should be unchanged when startCol > endCol');
+    }
+
+    #[Test]
+    public function clear_clamps_out_of_range_end_values(): void
+    {
+        $buffer = new CellBuffer(10, 5);
+
+        // Write content
+        $buffer->writeChar(4, 9, 'X');
+
+        // Clear with out-of-range end values - should clamp
+        $buffer->clear(4, 0, 100, 100);
+
+        $this->assertEquals(' ', $buffer->getCell(4, 9)->char,
+            'Cell should be cleared even with out-of-range end values');
+    }
+
+    #[Test]
+    public function clear_with_all_negative_values_does_nothing(): void
+    {
+        $buffer = new CellBuffer(10, 5);
+
+        // Write content
+        $buffer->writeChar(0, 0, 'A');
+
+        // Clear with all negative/invalid range - should do nothing
+        $buffer->clear(-5, -5, -1, -1);
+
+        $this->assertEquals('A', $buffer->getCell(0, 0)->char,
+            'Content should be unchanged when entire range is negative');
+    }
+
+    #[Test]
+    public function clear_does_not_create_negative_indices(): void
+    {
+        $buffer = new CellBuffer(10, 5);
+
+        // Write content to all columns of row 0
+        for ($col = 0; $col < 10; $col++) {
+            $buffer->writeChar(0, $col, chr(65 + $col)); // A, B, C, ...
+        }
+
+        // Clear with negative startCol - this should NOT create negative array indices
+        $buffer->clear(0, -1000, 0, 2);
+
+        // After clamping, should clear cols 0, 1, 2
+        $this->assertEquals(' ', $buffer->getCell(0, 0)->char);
+        $this->assertEquals(' ', $buffer->getCell(0, 1)->char);
+        $this->assertEquals(' ', $buffer->getCell(0, 2)->char);
+        $this->assertEquals('D', $buffer->getCell(0, 3)->char);
+
+        // The cells array should only have valid indices (0 to width*height-1)
+        // Use reflection to check internal state
+        $reflection = new \ReflectionClass($buffer);
+        $cellsProperty = $reflection->getProperty('cells');
+        $cellsProperty->setAccessible(true);
+        $cells = $cellsProperty->getValue($buffer);
+
+        foreach (array_keys($cells) as $index) {
+            $this->assertGreaterThanOrEqual(0, $index,
+                'Cell indices should never be negative');
+            $this->assertLessThan(10 * 5, $index,
+                'Cell indices should be within buffer bounds');
+        }
+    }
+
+    #[Test]
     public function benchmark_flat_vs_2d_access(): void
     {
         $buffer = new CellBuffer(200, 50);
