@@ -190,6 +190,77 @@ class CellBufferTest extends TestCase
     }
 
     #[Test]
+    public function insert_lines_shifts_sequence_numbers(): void
+    {
+        $seqNo = 0;
+        $buffer = new CellBuffer(10, 5);
+        $buffer->setSeqNoProvider(function () use (&$seqNo) {
+            return ++$seqNo;
+        });
+
+        // Write to rows 0, 1, 2 (seqNos 1, 2, 3)
+        $buffer->writeChar(0, 0, 'A');
+        $buffer->writeChar(1, 0, 'B');
+        $buffer->writeChar(2, 0, 'C');
+
+        // Get the sequence number after writing to row 1
+        $seqAfterRow1 = 2;
+
+        // Insert 2 lines at row 1 - should shift rows 1,2 to become rows 3,4
+        $buffer->insertLines(1, 2);
+
+        // Row 0 should still have A
+        $this->assertEquals('A', $buffer->getCell(0, 0)->char);
+        // Rows 1,2 are new blank rows
+        $this->assertEquals(' ', $buffer->getCell(1, 0)->char);
+        $this->assertEquals(' ', $buffer->getCell(2, 0)->char);
+        // Old row 1 (B) is now row 3
+        $this->assertEquals('B', $buffer->getCell(3, 0)->char);
+        // Old row 2 (C) is now row 4
+        $this->assertEquals('C', $buffer->getCell(4, 0)->char);
+
+        // The sequence numbers should have shifted - row 3 should have the
+        // sequence number that was originally assigned to row 1
+        $changedRows = $buffer->getChangedRows($seqAfterRow1);
+        // Row 3 (originally row 1) was modified at seqNo 2, so it should appear
+        // in changes since seqNo 2
+        $this->assertContains(3, $changedRows);
+    }
+
+    #[Test]
+    public function delete_lines_shifts_sequence_numbers(): void
+    {
+        $seqNo = 0;
+        $buffer = new CellBuffer(10, 5);
+        $buffer->setSeqNoProvider(function () use (&$seqNo) {
+            return ++$seqNo;
+        });
+
+        // Write to rows 0, 1, 2, 3 (seqNos 1, 2, 3, 4)
+        $buffer->writeChar(0, 0, 'A');
+        $buffer->writeChar(1, 0, 'B');
+        $buffer->writeChar(2, 0, 'C');
+        $buffer->writeChar(3, 0, 'D');
+
+        // Get the sequence number after writing to row 2
+        $seqAfterRow2 = 3;
+
+        // Delete rows 1 and 2 - rows 3 becomes row 1
+        $buffer->deleteLines(1, 2);
+
+        // Row 0 should still have A
+        $this->assertEquals('A', $buffer->getCell(0, 0)->char);
+        // Old row 3 (D) is now row 1
+        $this->assertEquals('D', $buffer->getCell(1, 0)->char);
+
+        // The sequence number for old row 3 should now be at row 1
+        $changedRows = $buffer->getChangedRows($seqAfterRow2);
+        // Row 1 (originally row 3) was modified at seqNo 4, so it should appear
+        // in changes since seqNo 3
+        $this->assertContains(1, $changedRows);
+    }
+
+    #[Test]
     public function continuation_cell_for_wide_characters(): void
     {
         $buffer = new CellBuffer(10, 5);

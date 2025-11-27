@@ -782,6 +782,17 @@ class CellBuffer
 
         $this->height += $count;
 
+        // Shift lineSeqNos entries for rows >= $atRow up by $count.
+        // Iterate in descending order to avoid overwriting entries.
+        $keys = array_keys($this->lineSeqNos);
+        rsort($keys, SORT_NUMERIC);
+        foreach ($keys as $row) {
+            if ($row >= $atRow) {
+                $this->lineSeqNos[$row + $count] = $this->lineSeqNos[$row];
+                unset($this->lineSeqNos[$row]);
+            }
+        }
+
         // Mark all affected rows as dirty
         for ($row = $atRow; $row < $this->height; $row++) {
             $this->markLineDirty($row);
@@ -805,6 +816,21 @@ class CellBuffer
 
         array_splice($this->cells, $deleteIndex, $deleteCount);
         $this->height -= $count;
+
+        // Update lineSeqNos: remove entries for deleted rows and shift
+        // entries for rows >= $atRow + $count down by $count.
+        $newLineSeqNos = [];
+        foreach ($this->lineSeqNos as $row => $seqNo) {
+            if ($row < $atRow) {
+                // Rows before deletion point are unchanged
+                $newLineSeqNos[$row] = $seqNo;
+            } elseif ($row >= $atRow + $count) {
+                // Rows after deleted region shift down by $count
+                $newLineSeqNos[$row - $count] = $seqNo;
+            }
+            // Rows in the deleted range [$atRow, $atRow + $count) are discarded
+        }
+        $this->lineSeqNos = $newLineSeqNos;
 
         // Mark all affected rows as dirty
         for ($row = $atRow; $row < $this->height; $row++) {
