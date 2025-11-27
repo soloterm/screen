@@ -416,6 +416,8 @@ class Screen
     {
         if (($this->cursorRow - $this->linesOffScreen) >= $this->height - 1) {
             $this->linesOffScreen++;
+            // Mark all visible rows dirty since their visual positions changed
+            $this->markVisibleRowsDirty();
         }
 
         $this->moveCursorRow(relative: 1);

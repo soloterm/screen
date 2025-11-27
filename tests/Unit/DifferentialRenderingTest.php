@@ -240,4 +240,64 @@ class DifferentialRenderingTest extends TestCase
             )
         );
     }
+
+    #[Test]
+    public function newline_scroll_marks_visible_rows_dirty(): void
+    {
+        $screen = new Screen(80, 5);
+
+        // Fill the screen with 5 lines (viewport is full)
+        $screen->write("Line 1\n");
+        $screen->write("Line 2\n");
+        $screen->write("Line 3\n");
+        $screen->write("Line 4\n");
+        $screen->write("Line 5");
+
+        // Render and capture seqNo
+        $screen->output();
+        $seqNo = $screen->getLastRenderedSeqNo();
+
+        // Now write a newline which should trigger scroll (cursor at bottom)
+        // This moves to a new line, incrementing linesOffScreen
+        $screen->write("\nLine 6");
+
+        // All visible rows should be marked dirty because the viewport scrolled
+        $changedRows = $screen->printable->getChangedRows($seqNo);
+
+        // We should have at least all 5 visible rows marked dirty
+        // The visible rows after scroll are indices 1-5 (rows 0 scrolled off)
+        $this->assertGreaterThanOrEqual(5, count($changedRows),
+            'newlineWithScroll should mark all visible rows dirty when viewport scrolls');
+    }
+
+    #[Test]
+    public function newline_scroll_differential_output_includes_shifted_content(): void
+    {
+        $screen = new Screen(80, 5);
+
+        // Fill with unique content per line so we can verify
+        $screen->write("AAA\n");
+        $screen->write("BBB\n");
+        $screen->write("CCC\n");
+        $screen->write("DDD\n");
+        $screen->write("EEE");
+
+        $screen->output();
+        $seqNo = $screen->getLastRenderedSeqNo();
+
+        // Write newline + new content, triggering scroll
+        $screen->write("\nFFF");
+
+        // Get differential output
+        $diffOutput = $screen->output($seqNo);
+
+        // After scroll: BBB is now row 1, CCC row 2, DDD row 3, EEE row 4, FFF row 5
+        // All should be in the differential output since they've all shifted
+        $this->assertStringContainsString('BBB', $diffOutput,
+            'Shifted content should be re-rendered after newline scroll');
+        $this->assertStringContainsString('CCC', $diffOutput);
+        $this->assertStringContainsString('DDD', $diffOutput);
+        $this->assertStringContainsString('EEE', $diffOutput);
+        $this->assertStringContainsString('FFF', $diffOutput);
+    }
 }
