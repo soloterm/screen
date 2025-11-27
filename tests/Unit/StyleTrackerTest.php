@@ -19,7 +19,7 @@ class StyleTrackerTest extends TestCase
     #[Test]
     public function starts_with_no_style(): void
     {
-        $tracker = new StyleTracker();
+        $tracker = new StyleTracker;
 
         $this->assertFalse($tracker->hasStyle());
     }
@@ -27,7 +27,7 @@ class StyleTrackerTest extends TestCase
     #[Test]
     public function no_transition_for_identical_style(): void
     {
-        $tracker = new StyleTracker();
+        $tracker = new StyleTracker;
         $cell = Cell::blank();
 
         $result = $tracker->transitionTo($cell);
@@ -38,7 +38,7 @@ class StyleTrackerTest extends TestCase
     #[Test]
     public function adds_foreground_color(): void
     {
-        $tracker = new StyleTracker();
+        $tracker = new StyleTracker;
         $cell = new Cell('A', 0, 31); // Red foreground
 
         $result = $tracker->transitionTo($cell);
@@ -50,7 +50,7 @@ class StyleTrackerTest extends TestCase
     #[Test]
     public function adds_background_color(): void
     {
-        $tracker = new StyleTracker();
+        $tracker = new StyleTracker;
         $cell = new Cell('A', 0, null, 44); // Blue background
 
         $result = $tracker->transitionTo($cell);
@@ -61,7 +61,7 @@ class StyleTrackerTest extends TestCase
     #[Test]
     public function adds_bold_style(): void
     {
-        $tracker = new StyleTracker();
+        $tracker = new StyleTracker;
         $cell = new Cell('A', 1); // Bold (bit 0)
 
         $result = $tracker->transitionTo($cell);
@@ -72,7 +72,7 @@ class StyleTrackerTest extends TestCase
     #[Test]
     public function adds_multiple_styles(): void
     {
-        $tracker = new StyleTracker();
+        $tracker = new StyleTracker;
         $cell = new Cell('A', 3, 31); // Bold + Dim + Red
 
         $result = $tracker->transitionTo($cell);
@@ -85,7 +85,7 @@ class StyleTrackerTest extends TestCase
     #[Test]
     public function incremental_add_doesnt_repeat(): void
     {
-        $tracker = new StyleTracker();
+        $tracker = new StyleTracker;
 
         // First: add red
         $cell1 = new Cell('A', 0, 31);
@@ -102,7 +102,7 @@ class StyleTrackerTest extends TestCase
     #[Test]
     public function removing_style_triggers_reset(): void
     {
-        $tracker = new StyleTracker();
+        $tracker = new StyleTracker;
 
         // First: bold + red
         $cell1 = new Cell('A', 1, 31);
@@ -121,7 +121,7 @@ class StyleTrackerTest extends TestCase
     #[Test]
     public function reset_clears_state(): void
     {
-        $tracker = new StyleTracker();
+        $tracker = new StyleTracker;
 
         $cell = new Cell('A', 1, 31);
         $tracker->transitionTo($cell);
@@ -136,7 +136,7 @@ class StyleTrackerTest extends TestCase
     #[Test]
     public function reset_if_needed_emits_code(): void
     {
-        $tracker = new StyleTracker();
+        $tracker = new StyleTracker;
 
         $cell = new Cell('A', 1, 31);
         $tracker->transitionTo($cell);
@@ -149,7 +149,7 @@ class StyleTrackerTest extends TestCase
     #[Test]
     public function reset_if_needed_empty_when_no_style(): void
     {
-        $tracker = new StyleTracker();
+        $tracker = new StyleTracker;
 
         $result = $tracker->resetIfNeeded();
 
@@ -159,7 +159,7 @@ class StyleTrackerTest extends TestCase
     #[Test]
     public function handles_extended_256_color_foreground(): void
     {
-        $tracker = new StyleTracker();
+        $tracker = new StyleTracker;
         $cell = new Cell('A', 0, null, null, [5, 196]); // 256-color red
 
         $result = $tracker->transitionTo($cell);
@@ -170,7 +170,7 @@ class StyleTrackerTest extends TestCase
     #[Test]
     public function handles_extended_rgb_foreground(): void
     {
-        $tracker = new StyleTracker();
+        $tracker = new StyleTracker;
         $cell = new Cell('A', 0, null, null, [2, 255, 128, 0]); // RGB orange
 
         $result = $tracker->transitionTo($cell);
@@ -181,7 +181,7 @@ class StyleTrackerTest extends TestCase
     #[Test]
     public function handles_extended_background(): void
     {
-        $tracker = new StyleTracker();
+        $tracker = new StyleTracker;
         $cell = new Cell('A', 0, null, null, null, [5, 21]); // 256-color blue bg
 
         $result = $tracker->transitionTo($cell);
@@ -192,7 +192,7 @@ class StyleTrackerTest extends TestCase
     #[Test]
     public function transition_from_extended_to_basic(): void
     {
-        $tracker = new StyleTracker();
+        $tracker = new StyleTracker;
 
         // First: 256-color
         $cell1 = new Cell('A', 0, null, null, [5, 196]);
@@ -210,7 +210,7 @@ class StyleTrackerTest extends TestCase
     #[Test]
     public function benchmark_style_tracking(): void
     {
-        $tracker = new StyleTracker();
+        $tracker = new StyleTracker;
 
         // Simulate realistic terminal output: runs of same style with occasional changes
         // Like: "ERROR: " in red, then "some message" in default, repeated
@@ -233,17 +233,21 @@ class StyleTrackerTest extends TestCase
             $trackedBytes += strlen($tracker->transitionTo($cell));
             // Full would always emit complete sequence
             $codes = [];
-            if ($cell->style & 1) $codes[] = '1';
-            if ($cell->fg) $codes[] = (string) $cell->fg;
+            if ($cell->style & 1) {
+                $codes[] = '1';
+            }
+            if ($cell->fg) {
+                $codes[] = (string) $cell->fg;
+            }
             if (!empty($codes)) {
-                $fullBytes += strlen("\e[" . implode(';', $codes) . "m");
+                $fullBytes += strlen("\e[" . implode(';', $codes) . 'm');
             }
         }
 
         echo "\n\nStyle Tracking Optimization (realistic runs):\n";
         echo "  Tracked: {$trackedBytes} bytes\n";
         echo "  Full Each Time: {$fullBytes} bytes\n";
-        echo "  Savings: " . round((1 - $trackedBytes / $fullBytes) * 100, 1) . "%\n";
+        echo '  Savings: ' . round((1 - $trackedBytes / $fullBytes) * 100, 1) . "%\n";
 
         // Tracked should be smaller (due to incremental updates)
         $this->assertLessThan($fullBytes, $trackedBytes);

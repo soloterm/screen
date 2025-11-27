@@ -30,7 +30,7 @@ class CellBufferVsScreenBenchmarkTest extends TestCase
             $start = hrtime(true);
             for ($row = 0; $row < $height; $row++) {
                 $line = str_repeat('X', $width);
-                $screen->write("\e[" . ($row + 1) . ";1H" . $line);
+                $screen->write("\e[" . ($row + 1) . ';1H' . $line);
             }
             $screenWriteTime += hrtime(true) - $start;
         }
@@ -53,9 +53,9 @@ class CellBufferVsScreenBenchmarkTest extends TestCase
         $cellBufferMs = $cellBufferWriteTime / 1_000_000;
 
         echo "\n\nWrite Performance ({$iterations} iterations of {$width}x{$height} screen):\n";
-        echo "  Screen:     " . number_format($screenMs, 2) . " ms\n";
-        echo "  CellBuffer: " . number_format($cellBufferMs, 2) . " ms\n";
-        echo "  Ratio:      " . number_format($screenMs / $cellBufferMs, 2) . "x\n";
+        echo '  Screen:     ' . number_format($screenMs, 2) . " ms\n";
+        echo '  CellBuffer: ' . number_format($cellBufferMs, 2) . " ms\n";
+        echo '  Ratio:      ' . number_format($screenMs / $cellBufferMs, 2) . "x\n";
 
         // CellBuffer should be faster (no ANSI parsing overhead)
         $this->assertTrue(true); // Just run the benchmark
@@ -102,9 +102,9 @@ class CellBufferVsScreenBenchmarkTest extends TestCase
         $cellBufferMs = $cellBufferRenderTime / 1_000_000;
 
         echo "\n\nRender Performance ({$iterations} iterations of {$width}x{$height} screen):\n";
-        echo "  Screen:     " . number_format($screenMs, 2) . " ms\n";
-        echo "  CellBuffer: " . number_format($cellBufferMs, 2) . " ms\n";
-        echo "  Ratio:      " . number_format($screenMs / $cellBufferMs, 2) . "x\n";
+        echo '  Screen:     ' . number_format($screenMs, 2) . " ms\n";
+        echo '  CellBuffer: ' . number_format($cellBufferMs, 2) . " ms\n";
+        echo '  Ratio:      ' . number_format($screenMs / $cellBufferMs, 2) . "x\n";
 
         $this->assertTrue(true);
     }
@@ -131,7 +131,7 @@ class CellBufferVsScreenBenchmarkTest extends TestCase
         // Setup Screen with content
         $screen = new Screen($width, $height);
         for ($row = 0; $row < $height; $row++) {
-            $screen->write("\e[" . ($row + 1) . ";1H" . str_repeat('X', $width));
+            $screen->write("\e[" . ($row + 1) . ';1H' . str_repeat('X', $width));
         }
         $initialSeqNo = $screen->getSeqNo();
 
@@ -157,9 +157,9 @@ class CellBufferVsScreenBenchmarkTest extends TestCase
         $cellBufferMs = $cellBufferDiffTime / 1_000_000;
 
         echo "\n\nDifferential Render Performance ({$iterations} iterations, single cell change):\n";
-        echo "  Screen:     " . number_format($screenMs, 2) . " ms\n";
-        echo "  CellBuffer: " . number_format($cellBufferMs, 2) . " ms\n";
-        echo "  Ratio:      " . number_format($screenMs / $cellBufferMs, 2) . "x\n";
+        echo '  Screen:     ' . number_format($screenMs, 2) . " ms\n";
+        echo '  CellBuffer: ' . number_format($cellBufferMs, 2) . " ms\n";
+        echo '  Ratio:      ' . number_format($screenMs / $cellBufferMs, 2) . "x\n";
 
         // CellBuffer diff should be much faster
         $this->assertLessThan($screenMs / 2, $cellBufferMs);
@@ -197,8 +197,8 @@ class CellBufferVsScreenBenchmarkTest extends TestCase
         $cellBufferMemory = $afterCellBuffer - $beforeCellBuffer;
 
         echo "\n\nMemory Usage ({$width}x{$height} screen with styling):\n";
-        echo "  Screen:     " . number_format($screenMemory / 1024, 2) . " KB\n";
-        echo "  CellBuffer: " . number_format($cellBufferMemory / 1024, 2) . " KB\n";
+        echo '  Screen:     ' . number_format($screenMemory / 1024, 2) . " KB\n";
+        echo '  CellBuffer: ' . number_format($cellBufferMemory / 1024, 2) . " KB\n";
 
         $this->assertTrue(true);
     }

@@ -18,7 +18,7 @@ class CursorOptimizerTest extends TestCase
     #[Test]
     public function starts_at_origin(): void
     {
-        $optimizer = new CursorOptimizer();
+        $optimizer = new CursorOptimizer;
 
         $this->assertEquals(['row' => 0, 'col' => 0], $optimizer->getPosition());
     }
@@ -26,7 +26,7 @@ class CursorOptimizerTest extends TestCase
     #[Test]
     public function no_movement_when_already_at_target(): void
     {
-        $optimizer = new CursorOptimizer();
+        $optimizer = new CursorOptimizer;
 
         $result = $optimizer->moveTo(0, 0);
 
@@ -36,7 +36,7 @@ class CursorOptimizerTest extends TestCase
     #[Test]
     public function uses_home_for_origin(): void
     {
-        $optimizer = new CursorOptimizer();
+        $optimizer = new CursorOptimizer;
         $optimizer->moveTo(10, 10);
 
         $result = $optimizer->moveTo(0, 0);
@@ -47,7 +47,7 @@ class CursorOptimizerTest extends TestCase
     #[Test]
     public function uses_carriage_return_for_column_zero(): void
     {
-        $optimizer = new CursorOptimizer();
+        $optimizer = new CursorOptimizer;
         $optimizer->moveTo(5, 50);
 
         $result = $optimizer->moveTo(5, 0);
@@ -58,7 +58,7 @@ class CursorOptimizerTest extends TestCase
     #[Test]
     public function uses_newline_for_down_one_from_col_zero(): void
     {
-        $optimizer = new CursorOptimizer();
+        $optimizer = new CursorOptimizer;
         // Start at row 5, col 0
         $optimizer->moveTo(5, 0);
 
@@ -70,7 +70,7 @@ class CursorOptimizerTest extends TestCase
     #[Test]
     public function tracks_position_after_movement(): void
     {
-        $optimizer = new CursorOptimizer();
+        $optimizer = new CursorOptimizer;
         $optimizer->moveTo(10, 20);
 
         $this->assertEquals(['row' => 10, 'col' => 20], $optimizer->getPosition());
@@ -79,7 +79,7 @@ class CursorOptimizerTest extends TestCase
     #[Test]
     public function advance_updates_column(): void
     {
-        $optimizer = new CursorOptimizer();
+        $optimizer = new CursorOptimizer;
         $optimizer->moveTo(5, 10);
         $optimizer->advance(1);
 
@@ -89,7 +89,7 @@ class CursorOptimizerTest extends TestCase
     #[Test]
     public function advance_handles_wide_characters(): void
     {
-        $optimizer = new CursorOptimizer();
+        $optimizer = new CursorOptimizer;
         $optimizer->moveTo(5, 10);
         $optimizer->advance(2);
 
@@ -99,7 +99,7 @@ class CursorOptimizerTest extends TestCase
     #[Test]
     public function reset_returns_to_origin(): void
     {
-        $optimizer = new CursorOptimizer();
+        $optimizer = new CursorOptimizer;
         $optimizer->moveTo(10, 20);
         $optimizer->reset();
 
@@ -109,7 +109,7 @@ class CursorOptimizerTest extends TestCase
     #[Test]
     public function relative_move_right_one(): void
     {
-        $optimizer = new CursorOptimizer();
+        $optimizer = new CursorOptimizer;
         $optimizer->moveTo(5, 10);
 
         $result = $optimizer->moveTo(5, 11);
@@ -120,7 +120,7 @@ class CursorOptimizerTest extends TestCase
     #[Test]
     public function relative_move_left_one(): void
     {
-        $optimizer = new CursorOptimizer();
+        $optimizer = new CursorOptimizer;
         $optimizer->moveTo(5, 10);
 
         $result = $optimizer->moveTo(5, 9);
@@ -131,7 +131,7 @@ class CursorOptimizerTest extends TestCase
     #[Test]
     public function relative_move_up_one(): void
     {
-        $optimizer = new CursorOptimizer();
+        $optimizer = new CursorOptimizer;
         $optimizer->moveTo(5, 10);
 
         $result = $optimizer->moveTo(4, 10);
@@ -142,7 +142,7 @@ class CursorOptimizerTest extends TestCase
     #[Test]
     public function relative_move_down_one(): void
     {
-        $optimizer = new CursorOptimizer();
+        $optimizer = new CursorOptimizer;
         $optimizer->moveTo(5, 10);
 
         $result = $optimizer->moveTo(6, 10);
@@ -153,7 +153,7 @@ class CursorOptimizerTest extends TestCase
     #[Test]
     public function relative_move_multiple_right(): void
     {
-        $optimizer = new CursorOptimizer();
+        $optimizer = new CursorOptimizer;
         $optimizer->moveTo(5, 10);
 
         $result = $optimizer->moveTo(5, 15);
@@ -164,7 +164,7 @@ class CursorOptimizerTest extends TestCase
     #[Test]
     public function absolute_move_when_cheaper(): void
     {
-        $optimizer = new CursorOptimizer();
+        $optimizer = new CursorOptimizer;
 
         // From origin to row 1, col 1: absolute is ESC[2;2H (6 bytes)
         // Relative would be ESC[B + ESC[C (6 bytes) - equal, might choose either
@@ -177,7 +177,7 @@ class CursorOptimizerTest extends TestCase
     #[Test]
     public function chooses_optimal_for_large_jump(): void
     {
-        $optimizer = new CursorOptimizer();
+        $optimizer = new CursorOptimizer;
         $optimizer->moveTo(0, 0);
 
         // Jump to row 25, col 80
@@ -192,7 +192,7 @@ class CursorOptimizerTest extends TestCase
     #[Test]
     public function benchmark_optimizer_vs_always_absolute(): void
     {
-        $optimizer = new CursorOptimizer();
+        $optimizer = new CursorOptimizer;
 
         // Simulate typical diff rendering: scattered changes
         $positions = [
@@ -208,14 +208,14 @@ class CursorOptimizerTest extends TestCase
 
         foreach ($positions as [$row, $col]) {
             $optimizedBytes += strlen($optimizer->moveTo($row, $col));
-            $absoluteBytes += strlen("\e[" . ($row + 1) . ";" . ($col + 1) . "H");
+            $absoluteBytes += strlen("\e[" . ($row + 1) . ';' . ($col + 1) . 'H');
             $optimizer->advance(1); // Simulate writing a character
         }
 
         echo "\n\nCursor Movement Optimization:\n";
         echo "  Optimized: {$optimizedBytes} bytes\n";
         echo "  Always Absolute: {$absoluteBytes} bytes\n";
-        echo "  Savings: " . round((1 - $optimizedBytes / $absoluteBytes) * 100, 1) . "%\n";
+        echo '  Savings: ' . round((1 - $optimizedBytes / $absoluteBytes) * 100, 1) . "%\n";
 
         // Optimized should be smaller
         $this->assertLessThan($absoluteBytes, $optimizedBytes);

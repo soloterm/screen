@@ -323,7 +323,7 @@ class Screen
     /**
      * Handle an ANSI escape code.
      *
-     * @param AnsiMatch|ParsedAnsi $ansi The parsed ANSI sequence
+     * @param  AnsiMatch|ParsedAnsi  $ansi  The parsed ANSI sequence
      */
     protected function handleAnsiCode(AnsiMatch|ParsedAnsi $ansi)
     {
@@ -750,7 +750,7 @@ class Screen
      * differential rendering, comparing actual cell content
      * rather than just tracking which cells were written.
      *
-     * @param CellBuffer|null $targetBuffer Optional existing buffer to write into
+     * @param  CellBuffer|null  $targetBuffer  Optional existing buffer to write into
      * @return CellBuffer The buffer containing the visible screen content
      */
     public function toCellBuffer(?CellBuffer $targetBuffer = null): CellBuffer
@@ -796,7 +796,7 @@ class Screen
     /**
      * Extract Cell-compatible style, foreground, and background from AnsiBuffer bitmask.
      *
-     * @param int $bits The AnsiBuffer bitmask
+     * @param  int  $bits  The AnsiBuffer bitmask
      * @return array{int, int|null, int|null} [style, fg, bg]
      */
     protected function extractStyleFromBits(int $bits): array

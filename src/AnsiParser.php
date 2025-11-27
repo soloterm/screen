@@ -39,7 +39,7 @@ class AnsiParser
      * This method is a drop-in replacement for AnsiMatcher::split().
      * Optimized version with inlined checks for better performance.
      *
-     * @param string $input The input string to parse
+     * @param  string  $input  The input string to parse
      * @return array<string|AnsiMatch> Array of text strings and ANSI match objects
      */
     public static function parse(string $input): array
@@ -114,6 +114,7 @@ class AnsiParser
                         $i++;
                         $tokens[] = new AnsiMatch(substr($input, $escStart, $i - $escStart));
                         $textStart = $i;
+
                         continue;
                     }
                 }
@@ -177,7 +178,7 @@ class AnsiParser
      * This is faster because ParsedAnsi doesn't use regex for parsing.
      * Use this when you don't need full AnsiMatch compatibility.
      *
-     * @param string $input The input string to parse
+     * @param  string  $input  The input string to parse
      * @return array<string|ParsedAnsi> Array of text strings and parsed ANSI objects
      */
     public static function parseFast(string $input): array
@@ -251,6 +252,7 @@ class AnsiParser
                         $i++;
                         $tokens[] = new ParsedAnsi(substr($input, $escStart, $i - $escStart));
                         $textStart = $i;
+
                         continue;
                     }
                 }

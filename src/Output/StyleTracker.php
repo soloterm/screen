@@ -73,7 +73,7 @@ class StyleTracker
     /**
      * Generate the escape sequence to transition to the target cell's style.
      *
-     * @param Cell $cell The target cell with desired style
+     * @param  Cell  $cell  The target cell with desired style
      * @return string The escape sequence (empty if no change needed)
      */
     public function transitionTo(Cell $cell): string
@@ -163,7 +163,7 @@ class StyleTracker
             return '';
         }
 
-        return "\e[" . implode(';', $codes) . "m";
+        return "\e[" . implode(';', $codes) . 'm';
     }
 
     /**
@@ -175,6 +175,7 @@ class StyleTracker
     {
         if ($this->hasStyle()) {
             $this->reset();
+
             return "\e[0m";
         }
 
@@ -184,7 +185,7 @@ class StyleTracker
     /**
      * Convert a style bitmask to an array of ANSI code strings.
      *
-     * @param int $bitmask The style bitmask
+     * @param  int  $bitmask  The style bitmask
      * @return array<string> Array of ANSI code strings
      */
     protected function getStyleCodes(int $bitmask): array

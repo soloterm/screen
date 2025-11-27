@@ -18,6 +18,7 @@ namespace SoloTerm\Screen;
 class ParsedAnsi implements \Stringable
 {
     public ?string $command;
+
     public ?string $params;
 
     public function __construct(public string $raw)
@@ -28,6 +29,7 @@ class ParsedAnsi implements \Stringable
         if ($len < 2 || $raw[0] !== "\x1B") {
             $this->command = null;
             $this->params = null;
+
             return;
         }
 
