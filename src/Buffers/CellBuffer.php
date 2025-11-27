@@ -412,16 +412,16 @@ class CellBuffer
             $hash = (($hash * 31) + ($cell->fg ?? -1)) & 0x7FFFFFFF;
             $hash = (($hash * 31) + ($cell->bg ?? -1)) & 0x7FFFFFFF;
 
-            // Handle extended colors (RGB)
-            if ($cell->extFg) {
-                $hash = (($hash * 31) + $cell->extFg[0]) & 0x7FFFFFFF;
-                $hash = (($hash * 31) + $cell->extFg[1]) & 0x7FFFFFFF;
-                $hash = (($hash * 31) + $cell->extFg[2]) & 0x7FFFFFFF;
+            // Handle extended colors (256-color: [5, index], RGB: [2, r, g, b])
+            if (is_array($cell->extFg)) {
+                foreach ($cell->extFg as $value) {
+                    $hash = (($hash * 31) + $value) & 0x7FFFFFFF;
+                }
             }
-            if ($cell->extBg) {
-                $hash = (($hash * 31) + $cell->extBg[0]) & 0x7FFFFFFF;
-                $hash = (($hash * 31) + $cell->extBg[1]) & 0x7FFFFFFF;
-                $hash = (($hash * 31) + $cell->extBg[2]) & 0x7FFFFFFF;
+            if (is_array($cell->extBg)) {
+                foreach ($cell->extBg as $value) {
+                    $hash = (($hash * 31) + $value) & 0x7FFFFFFF;
+                }
             }
         }
 

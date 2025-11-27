@@ -372,6 +372,55 @@ class CellBufferTest extends TestCase
     }
 
     #[Test]
+    public function row_hash_handles_256_color_ext_arrays(): void
+    {
+        $buffer = new CellBuffer(10, 5);
+
+        // 256-color mode uses 2-element arrays: [5, colorIndex]
+        $cell = new Cell('A', 0, null, null, [5, 123], [5, 45]);
+        $buffer->setCell(0, 0, $cell);
+
+        // This should not throw an undefined index error
+        $hash = $buffer->getRowHash(0);
+
+        $this->assertIsInt($hash, 'Row hash should be computed without error for 256-color cells');
+    }
+
+    #[Test]
+    public function row_hash_handles_rgb_color_ext_arrays(): void
+    {
+        $buffer = new CellBuffer(10, 5);
+
+        // RGB mode uses 4-element arrays: [2, r, g, b]
+        $cell = new Cell('A', 0, null, null, [2, 255, 128, 64], [2, 0, 100, 200]);
+        $buffer->setCell(0, 0, $cell);
+
+        // This should work correctly
+        $hash = $buffer->getRowHash(0);
+
+        $this->assertIsInt($hash, 'Row hash should be computed without error for RGB cells');
+    }
+
+    #[Test]
+    public function row_hash_differentiates_256_color_values(): void
+    {
+        $buffer1 = new CellBuffer(10, 5);
+        $buffer2 = new CellBuffer(10, 5);
+
+        // Same character, different 256-color values
+        $cell1 = new Cell('A', 0, null, null, [5, 100], null);
+        $cell2 = new Cell('A', 0, null, null, [5, 200], null);
+
+        $buffer1->setCell(0, 0, $cell1);
+        $buffer2->setCell(0, 0, $cell2);
+
+        $hash1 = $buffer1->getRowHash(0);
+        $hash2 = $buffer2->getRowHash(0);
+
+        $this->assertNotEquals($hash1, $hash2, 'Different 256-color values should produce different hashes');
+    }
+
+    #[Test]
     public function render_skips_continuation_cells(): void
     {
         $buffer = new CellBuffer(10, 5);
