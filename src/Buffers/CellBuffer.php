@@ -171,6 +171,7 @@ class CellBuffer
         $index = $row * $this->width + $col;
         $this->cells[$index] = $cell;
         $this->dirtyCells[$index] = true;
+        $this->invalidateRowHash($row);
         $this->markLineDirty($row);
     }
 
@@ -193,6 +194,7 @@ class CellBuffer
         $index = $row * $this->width + $col;
         $this->cells[$index] = $cell;
         $this->dirtyCells[$index] = true;
+        $this->invalidateRowHash($row);
         $this->markLineDirty($row);
     }
 
@@ -213,6 +215,8 @@ class CellBuffer
         $index = $row * $this->width + $col;
         $this->cells[$index] = $cell;
         $this->dirtyCells[$index] = true;
+        $this->invalidateRowHash($row);
+        $this->markLineDirty($row);
     }
 
     /**
@@ -241,6 +245,7 @@ class CellBuffer
                 $this->dirtyCells[$index] = true;
             }
 
+            $this->invalidateRowHash($row);
             $this->markLineDirty($row);
         }
     }
@@ -260,6 +265,7 @@ class CellBuffer
             $this->dirtyCells[$index] = true;
         }
 
+        $this->invalidateRowHash($row);
         $this->markLineDirty($row);
     }
 
@@ -285,6 +291,7 @@ class CellBuffer
             $this->dirtyCells[$index] = true;
         }
 
+        $this->invalidateRowHash($row);
         $this->markLineDirty($row);
     }
 

@@ -11,6 +11,7 @@ namespace SoloTerm\Screen\Tests\Unit;
 
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
+use SoloTerm\Screen\Cell;
 use SoloTerm\Screen\Buffers\CellBuffer;
 
 class CellBufferTest extends TestCase
@@ -269,6 +270,105 @@ class CellBufferTest extends TestCase
 
         $this->assertEquals('文', $buffer->getCell(0, 0)->char);
         $this->assertTrue($buffer->getCell(0, 1)->isContinuation());
+    }
+
+    #[Test]
+    public function row_hash_invalidated_on_setCell(): void
+    {
+        $buffer = new CellBuffer(10, 5);
+        $buffer->writeChar(0, 0, 'A');
+
+        $hash1 = $buffer->getRowHash(0);
+
+        // Modify the row using setCell
+        $buffer->setCell(0, 0, new Cell('B'));
+
+        $hash2 = $buffer->getRowHash(0);
+
+        $this->assertNotEquals($hash1, $hash2, 'Row hash should change after setCell modifies the row');
+    }
+
+    #[Test]
+    public function row_hash_invalidated_on_writeChar(): void
+    {
+        $buffer = new CellBuffer(10, 5);
+        $buffer->writeChar(0, 0, 'A');
+
+        $hash1 = $buffer->getRowHash(0);
+
+        // Modify the row using writeChar
+        $buffer->writeChar(0, 0, 'B');
+
+        $hash2 = $buffer->getRowHash(0);
+
+        $this->assertNotEquals($hash1, $hash2, 'Row hash should change after writeChar modifies the row');
+    }
+
+    #[Test]
+    public function row_hash_invalidated_on_writeContinuation(): void
+    {
+        $buffer = new CellBuffer(10, 5);
+        $buffer->writeChar(0, 0, 'A');
+        $buffer->writeChar(0, 1, 'B');
+
+        $hash1 = $buffer->getRowHash(0);
+
+        // Modify the row using writeContinuation
+        $buffer->writeContinuation(0, 1);
+
+        $hash2 = $buffer->getRowHash(0);
+
+        $this->assertNotEquals($hash1, $hash2, 'Row hash should change after writeContinuation modifies the row');
+    }
+
+    #[Test]
+    public function row_hash_invalidated_on_clear(): void
+    {
+        $buffer = new CellBuffer(10, 5);
+        $buffer->writeChar(0, 0, 'A');
+        $buffer->writeChar(0, 1, 'B');
+
+        $hash1 = $buffer->getRowHash(0);
+
+        // Clear part of the row
+        $buffer->clear(0, 0, 0, 0);
+
+        $hash2 = $buffer->getRowHash(0);
+
+        $this->assertNotEquals($hash1, $hash2, 'Row hash should change after clear modifies the row');
+    }
+
+    #[Test]
+    public function row_hash_invalidated_on_clearLine(): void
+    {
+        $buffer = new CellBuffer(10, 5);
+        $buffer->writeChar(0, 0, 'A');
+        $buffer->writeChar(0, 1, 'B');
+
+        $hash1 = $buffer->getRowHash(0);
+
+        // Clear the entire row
+        $buffer->clearLine(0);
+
+        $hash2 = $buffer->getRowHash(0);
+
+        $this->assertNotEquals($hash1, $hash2, 'Row hash should change after clearLine modifies the row');
+    }
+
+    #[Test]
+    public function row_hash_invalidated_on_fill(): void
+    {
+        $buffer = new CellBuffer(10, 5);
+        $buffer->writeChar(0, 0, 'A');
+
+        $hash1 = $buffer->getRowHash(0);
+
+        // Fill part of the row
+        $buffer->fill('X', 0, 0, 5);
+
+        $hash2 = $buffer->getRowHash(0);
+
+        $this->assertNotEquals($hash1, $hash2, 'Row hash should change after fill modifies the row');
     }
 
     #[Test]
