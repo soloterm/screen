@@ -421,6 +421,50 @@ class CellBufferTest extends TestCase
     }
 
     #[Test]
+    public function scroll_up_preserves_height_when_lines_exceeds_height(): void
+    {
+        $buffer = new CellBuffer(10, 5);
+
+        // Write some content
+        $buffer->writeChar(0, 0, 'A');
+        $buffer->writeChar(1, 0, 'B');
+        $buffer->writeChar(2, 0, 'C');
+
+        $originalHeight = $buffer->getHeight();
+        $this->assertEquals(5, $originalHeight);
+
+        // Scroll up by more lines than the buffer height
+        $buffer->scrollUp(10);
+
+        // Buffer should maintain its original height, not grow or shrink
+        $this->assertEquals($originalHeight, $buffer->getHeight(),
+            'scrollUp should preserve buffer height even when lines > height');
+    }
+
+    #[Test]
+    public function scroll_up_normal_operation(): void
+    {
+        $buffer = new CellBuffer(10, 5);
+
+        // Write content to identify rows
+        $buffer->writeChar(0, 0, 'A');
+        $buffer->writeChar(1, 0, 'B');
+        $buffer->writeChar(2, 0, 'C');
+        $buffer->writeChar(3, 0, 'D');
+        $buffer->writeChar(4, 0, 'E');
+
+        // Scroll up by 2 - should remove A and B, shift C,D,E up, add 2 blank rows
+        $buffer->scrollUp(2);
+
+        $this->assertEquals(5, $buffer->getHeight(), 'Height should remain 5 after scroll');
+        $this->assertEquals('C', $buffer->getCell(0, 0)->char, 'Row 0 should now have C');
+        $this->assertEquals('D', $buffer->getCell(1, 0)->char, 'Row 1 should now have D');
+        $this->assertEquals('E', $buffer->getCell(2, 0)->char, 'Row 2 should now have E');
+        $this->assertEquals(' ', $buffer->getCell(3, 0)->char, 'Row 3 should be blank');
+        $this->assertEquals(' ', $buffer->getCell(4, 0)->char, 'Row 4 should be blank');
+    }
+
+    #[Test]
     public function render_skips_continuation_cells(): void
     {
         $buffer = new CellBuffer(10, 5);

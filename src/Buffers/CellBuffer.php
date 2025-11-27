@@ -852,11 +852,14 @@ class CellBuffer
      */
     public function scrollUp(int $lines = 1): void
     {
+        // Capture original height before deletion
+        $origHeight = $this->height;
+
         // Delete from top
         $this->deleteLines(0, $lines);
 
-        // Insert at bottom
-        for ($i = 0; $i < $lines; $i++) {
+        // Insert blank rows at bottom to restore original height
+        while ($this->height < $origHeight) {
             $this->ensureRow($this->height);
         }
     }
