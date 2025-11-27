@@ -13,8 +13,10 @@ use Closure;
 use Exception;
 use SoloTerm\Screen\Buffers\AnsiBuffer;
 use SoloTerm\Screen\Buffers\Buffer;
+use SoloTerm\Screen\Buffers\CellBuffer;
 use SoloTerm\Screen\Buffers\PrintableBuffer;
 use SoloTerm\Screen\Buffers\Proxy;
+use Stringable;
 
 class Screen
 {
@@ -277,12 +279,14 @@ class Screen
             subject: $content
         );
 
-        // Split the line by ANSI codes. Each item in the resulting array
-        // will be a set of printable characters or an ANSI code.
-        $parts = AnsiMatcher::split($content);
+        // Split the line by ANSI codes using the fast state machine parser.
+        // Each item in the resulting array will be a set of printable characters
+        // or a ParsedAnsi object.
+        $parts = AnsiParser::parseFast($content);
 
         foreach ($parts as $part) {
-            if ($part instanceof AnsiMatch) {
+            if ($part instanceof Stringable) {
+                // ParsedAnsi or AnsiMatch object
                 if ($part->command) {
                     $this->handleAnsiCode($part);
                 }
@@ -316,7 +320,12 @@ class Screen
         }
     }
 
-    protected function handleAnsiCode(AnsiMatch $ansi)
+    /**
+     * Handle an ANSI escape code.
+     *
+     * @param AnsiMatch|ParsedAnsi $ansi The parsed ANSI sequence
+     */
+    protected function handleAnsiCode(AnsiMatch|ParsedAnsi $ansi)
     {
         $command = $ansi->command;
         $param = $ansi->params;
@@ -732,5 +741,113 @@ class Screen
         if ($response) {
             call_user_func($this->respondVia, $response);
         }
+    }
+
+    /**
+     * Convert the visible portion of the screen to a CellBuffer.
+     *
+     * This enables value-based comparison between frames for
+     * differential rendering, comparing actual cell content
+     * rather than just tracking which cells were written.
+     *
+     * @param CellBuffer|null $targetBuffer Optional existing buffer to write into
+     * @return CellBuffer The buffer containing the visible screen content
+     */
+    public function toCellBuffer(?CellBuffer $targetBuffer = null): CellBuffer
+    {
+        $buffer = $targetBuffer ?? new CellBuffer($this->width, $this->height);
+        $printable = $this->printable->getBuffer();
+
+        // Only convert the visible portion of the screen
+        for ($row = 0; $row < $this->height; $row++) {
+            $bufferRow = $row + $this->linesOffScreen;
+
+            $printableLine = $printable[$bufferRow] ?? [];
+            $ansiLine = $this->ansi->buffer[$bufferRow] ?? [];
+
+            for ($col = 0; $col < $this->width; $col++) {
+                $char = $printableLine[$col] ?? ' ';
+
+                // Get raw ANSI cell data
+                $ansiCell = $ansiLine[$col] ?? 0;
+
+                // Parse the ANSI cell
+                if (is_int($ansiCell)) {
+                    $bits = $ansiCell;
+                    $extFg = null;
+                    $extBg = null;
+                } else {
+                    $bits = $ansiCell[0] ?? 0;
+                    $extFg = $ansiCell[1] ?? null;
+                    $extBg = $ansiCell[2] ?? null;
+                }
+
+                // Convert to Cell - extract style, fg, bg from the bitmask
+                [$style, $fg, $bg] = $this->extractStyleFromBits($bits);
+
+                $cell = new Cell($char, $style, $fg, $bg, $extFg, $extBg);
+                $buffer->setCell($row, $col, $cell);
+            }
+        }
+
+        return $buffer;
+    }
+
+    /**
+     * Extract Cell-compatible style, foreground, and background from AnsiBuffer bitmask.
+     *
+     * @param int $bits The AnsiBuffer bitmask
+     * @return array{int, int|null, int|null} [style, fg, bg]
+     */
+    protected function extractStyleFromBits(int $bits): array
+    {
+        // The AnsiBuffer assigns bits to codes in the order they're added to $supported:
+        // 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 22-29, 30-39, 40-49, 90-97, 100-107
+        // Each gets a sequential bit (1, 2, 4, 8, 16, ...)
+
+        $style = 0;
+        $fg = null;
+        $bg = null;
+
+        // Build the code-to-bit mapping (matching AnsiBuffer::initialize)
+        $supported = [
+            0, // bit 0 (value 1)
+            1, 2, 3, 4, 5, 6, 7, 8, 9, // bits 1-9 (values 2, 4, 8, ...)
+            22, 23, 24, 25, 26, 27, 28, 29, // decoration resets
+            30, 31, 32, 33, 34, 35, 36, 37, 38, 39, // foreground
+            40, 41, 42, 43, 44, 45, 46, 47, 48, 49, // background
+            90, 91, 92, 93, 94, 95, 96, 97, // bright foreground
+            100, 101, 102, 103, 104, 105, 106, 107, // bright background
+        ];
+
+        $codesBits = [];
+        foreach ($supported as $i => $code) {
+            $codesBits[$code] = 1 << $i;
+        }
+
+        // Extract decoration style (codes 1-9 -> Cell style bits 0-8)
+        for ($code = 1; $code <= 9; $code++) {
+            if (isset($codesBits[$code]) && ($bits & $codesBits[$code])) {
+                $style |= (1 << ($code - 1));
+            }
+        }
+
+        // Extract foreground color (30-37, 90-97)
+        foreach ([...range(30, 37), ...range(90, 97)] as $code) {
+            if (isset($codesBits[$code]) && ($bits & $codesBits[$code])) {
+                $fg = $code;
+                break;
+            }
+        }
+
+        // Extract background color (40-47, 100-107)
+        foreach ([...range(40, 47), ...range(100, 107)] as $code) {
+            if (isset($codesBits[$code]) && ($bits & $codesBits[$code])) {
+                $bg = $code;
+                break;
+            }
+        }
+
+        return [$style, $fg, $bg];
     }
 }

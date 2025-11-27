@@ -246,4 +246,270 @@ class CellBufferTest extends TestCase
         $this->assertLessThan(5_000_000_000, $writeTime);
         $this->assertLessThan(5_000_000_000, $readTime);
     }
+
+    #[Test]
+    public function swap_buffers_enables_diff(): void
+    {
+        $buffer = new CellBuffer(10, 5);
+
+        $this->assertFalse($buffer->hasPreviousFrame());
+
+        $buffer->swapBuffers();
+
+        $this->assertTrue($buffer->hasPreviousFrame());
+    }
+
+    #[Test]
+    public function get_changed_cells_returns_all_without_previous_frame(): void
+    {
+        $buffer = new CellBuffer(5, 3);
+        $buffer->writeChar(0, 0, 'A');
+
+        $changed = $buffer->getChangedCells();
+
+        // Without previous frame, all cells should be returned
+        $this->assertCount(5 * 3, $changed);
+    }
+
+    #[Test]
+    public function get_changed_cells_detects_single_change(): void
+    {
+        $buffer = new CellBuffer(5, 3);
+        $buffer->writeChar(0, 0, 'A');
+        $buffer->swapBuffers();
+
+        // Make one change
+        $buffer->writeChar(0, 0, 'B');
+
+        $changed = $buffer->getChangedCells();
+
+        // Only one cell should be changed
+        $this->assertCount(1, $changed);
+        $this->assertEquals(0, $changed[0]['row']);
+        $this->assertEquals(0, $changed[0]['col']);
+        $this->assertEquals('B', $changed[0]['cell']->char);
+    }
+
+    #[Test]
+    public function get_changed_cells_detects_style_change(): void
+    {
+        $buffer = new CellBuffer(5, 3);
+        $buffer->writeChar(0, 0, 'A');
+        $buffer->swapBuffers();
+
+        // Same char but different style
+        $buffer->setStyle(1, 31, null, null, null);
+        $buffer->writeChar(0, 0, 'A');
+
+        $changed = $buffer->getChangedCells();
+
+        $this->assertCount(1, $changed);
+        $this->assertEquals(1, $changed[0]['cell']->style);
+        $this->assertEquals(31, $changed[0]['cell']->fg);
+    }
+
+    #[Test]
+    public function get_changed_cells_empty_when_no_changes(): void
+    {
+        $buffer = new CellBuffer(5, 3);
+        $buffer->writeChar(0, 0, 'A');
+        $buffer->swapBuffers();
+
+        // No changes made
+        $changed = $buffer->getChangedCells();
+
+        $this->assertCount(0, $changed);
+    }
+
+    #[Test]
+    public function get_changed_row_indices_returns_correct_rows(): void
+    {
+        $buffer = new CellBuffer(10, 5);
+        $buffer->writeChar(0, 0, 'A');
+        $buffer->writeChar(2, 0, 'B');
+        $buffer->swapBuffers();
+
+        // Change row 1 and row 3
+        $buffer->writeChar(1, 5, 'X');
+        $buffer->writeChar(3, 5, 'Y');
+
+        $changedRows = $buffer->getChangedRowIndices();
+
+        $this->assertCount(2, $changedRows);
+        $this->assertContains(1, $changedRows);
+        $this->assertContains(3, $changedRows);
+    }
+
+    #[Test]
+    public function render_diff_generates_cursor_movements(): void
+    {
+        $buffer = new CellBuffer(10, 5);
+        $buffer->writeChar(0, 0, 'A');
+        $buffer->swapBuffers();
+
+        // Change at position (2, 5)
+        $buffer->writeChar(2, 5, 'X');
+
+        $diff = $buffer->renderDiff();
+
+        // Should contain cursor positioning for row 3, col 6 (1-indexed)
+        $this->assertStringContainsString("\e[3;6H", $diff);
+        $this->assertStringContainsString('X', $diff);
+    }
+
+    #[Test]
+    public function render_diff_handles_styled_cells(): void
+    {
+        $buffer = new CellBuffer(10, 5);
+        $buffer->swapBuffers();
+
+        // Add styled change
+        $buffer->setStyle(1, 31, null, null, null); // Bold red
+        $buffer->writeChar(0, 0, 'R');
+
+        $diff = $buffer->renderDiff();
+
+        // Should contain style codes
+        $this->assertStringContainsString('31', $diff); // Red
+        $this->assertStringContainsString('R', $diff);
+    }
+
+    #[Test]
+    public function render_diff_empty_when_no_changes(): void
+    {
+        $buffer = new CellBuffer(10, 5);
+        $buffer->writeChar(0, 0, 'A');
+        $buffer->swapBuffers();
+
+        $diff = $buffer->renderDiff();
+
+        $this->assertEquals('', $diff);
+    }
+
+    #[Test]
+    public function render_diff_with_base_offset(): void
+    {
+        $buffer = new CellBuffer(10, 5);
+        $buffer->swapBuffers();
+
+        $buffer->writeChar(0, 0, 'X');
+
+        // With base offset (10, 20), position (0, 0) becomes (11, 21) in ANSI
+        $diff = $buffer->renderDiff(10, 20);
+
+        $this->assertStringContainsString("\e[11;21H", $diff);
+    }
+
+    #[Test]
+    public function benchmark_diff_vs_full_render(): void
+    {
+        $buffer = new CellBuffer(200, 50);
+
+        // Fill the buffer
+        for ($row = 0; $row < 50; $row++) {
+            for ($col = 0; $col < 200; $col++) {
+                $buffer->writeChar($row, $col, 'X');
+            }
+        }
+        $buffer->swapBuffers();
+
+        // Make a small change
+        $buffer->writeChar(25, 100, 'O');
+
+        // Time diff render
+        $start = hrtime(true);
+        for ($i = 0; $i < 1000; $i++) {
+            $diff = $buffer->renderDiff();
+        }
+        $diffTime = hrtime(true) - $start;
+
+        // Time full render
+        $start = hrtime(true);
+        for ($i = 0; $i < 1000; $i++) {
+            $full = $buffer->render();
+        }
+        $fullTime = hrtime(true) - $start;
+
+        // Diff should be significantly faster (at least 10x for single char change)
+        $this->assertLessThan($fullTime / 5, $diffTime);
+    }
+
+    #[Test]
+    public function benchmark_optimized_diff_vs_basic_diff(): void
+    {
+        $buffer = new CellBuffer(80, 25);
+
+        // Fill with styled content (simulating log output)
+        for ($row = 0; $row < 25; $row++) {
+            $buffer->setStyle(1, 31 + ($row % 7), null, null, null); // Bold + colors
+            for ($col = 0; $col < 80; $col++) {
+                $buffer->writeChar($row, $col, 'X');
+            }
+        }
+        $buffer->swapBuffers();
+
+        // Make scattered changes (simulating typical diff scenario)
+        $buffer->setStyle(1, 32, null, null, null); // Green
+        $buffer->writeChar(5, 10, 'A');
+        $buffer->writeChar(5, 11, 'B');
+        $buffer->writeChar(5, 12, 'C');
+        $buffer->writeChar(10, 20, 'D');
+        $buffer->writeChar(10, 21, 'E');
+        $buffer->writeChar(15, 0, 'F');
+        $buffer->writeChar(15, 1, 'G');
+        $buffer->writeChar(15, 2, 'H');
+
+        // Get output from both methods
+        $basicOutput = $buffer->renderDiff();
+        $optimizedOutput = $buffer->renderDiffOptimized();
+
+        $iterations = 1000;
+
+        // Benchmark basic diff
+        $start = hrtime(true);
+        for ($i = 0; $i < $iterations; $i++) {
+            $buffer->renderDiff();
+        }
+        $basicTime = hrtime(true) - $start;
+
+        // Benchmark optimized diff
+        $start = hrtime(true);
+        for ($i = 0; $i < $iterations; $i++) {
+            $buffer->renderDiffOptimized();
+        }
+        $optimizedTime = hrtime(true) - $start;
+
+        $basicMs = $basicTime / 1_000_000;
+        $optimizedMs = $optimizedTime / 1_000_000;
+        $basicBytes = strlen($basicOutput);
+        $optimizedBytes = strlen($optimizedOutput);
+
+        echo "\n\nDiff Output Comparison ({$iterations} iterations, 8 cell changes):\n";
+        echo "  Basic renderDiff:     " . number_format($basicMs, 2) . " ms, {$basicBytes} bytes\n";
+        echo "  Optimized renderDiff: " . number_format($optimizedMs, 2) . " ms, {$optimizedBytes} bytes\n";
+        echo "  Byte savings:         " . round((1 - $optimizedBytes / $basicBytes) * 100, 1) . "%\n";
+
+        // Optimized should produce smaller output
+        $this->assertLessThan($basicBytes, $optimizedBytes);
+    }
+
+    #[Test]
+    public function render_diff_optimized_produces_correct_output(): void
+    {
+        $buffer = new CellBuffer(10, 5);
+        $buffer->swapBuffers();
+
+        // Make a styled change
+        $buffer->setStyle(1, 31, null, null, null); // Bold red
+        $buffer->writeChar(2, 5, 'X');
+
+        $output = $buffer->renderDiffOptimized();
+
+        // Should contain cursor movement to row 2, col 5
+        $this->assertNotEmpty($output);
+        // Should contain style code
+        $this->assertStringContainsString('31', $output);
+        // Should contain the character
+        $this->assertStringContainsString('X', $output);
+    }
 }
