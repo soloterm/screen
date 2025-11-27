@@ -103,7 +103,7 @@ class Screen
      * that sequence number, with cursor positioning for each changed line.
      * This enables differential rendering for significant performance gains.
      *
-     * @param int|null $sinceSeqNo Only render lines changed after this sequence number
+     * @param  int|null  $sinceSeqNo  Only render lines changed after this sequence number
      * @return string The rendered output
      */
     public function output(?int $sinceSeqNo = null): string

@@ -12,7 +12,6 @@ namespace SoloTerm\Screen\Tests\Unit;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use SoloTerm\Screen\Buffers\CellBuffer;
-use SoloTerm\Screen\Cell;
 
 class CellBufferTest extends TestCase
 {

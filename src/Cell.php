@@ -20,12 +20,12 @@ class Cell
     /**
      * Create a new Cell.
      *
-     * @param string $char The printable character (or null for wide char continuation)
-     * @param int $style Bitmask of active ANSI decoration codes (bold, italic, etc.)
-     * @param int|null $fg Foreground color code (30-37, 90-97) or null for default
-     * @param int|null $bg Background color code (40-47, 100-107) or null for default
-     * @param array|null $extFg Extended foreground color [type, ...params] for 256/RGB colors
-     * @param array|null $extBg Extended background color [type, ...params] for 256/RGB colors
+     * @param  string  $char  The printable character (or null for wide char continuation)
+     * @param  int  $style  Bitmask of active ANSI decoration codes (bold, italic, etc.)
+     * @param  int|null  $fg  Foreground color code (30-37, 90-97) or null for default
+     * @param  int|null  $bg  Background color code (40-47, 100-107) or null for default
+     * @param  array|null  $extFg  Extended foreground color [type, ...params] for 256/RGB colors
+     * @param  array|null  $extBg  Extended background color [type, ...params] for 256/RGB colors
      */
     public function __construct(
         public string $char = ' ',
@@ -65,7 +65,7 @@ class Cell
      */
     public static function continuation(): self
     {
-        $cell = new self();
+        $cell = new self;
         $cell->char = '';
 
         return $cell;
@@ -120,7 +120,7 @@ class Cell
     /**
      * Get the ANSI escape sequence to transition from another cell's style to this cell's style.
      *
-     * @param Cell|null $previous The previous cell's style (null = reset state)
+     * @param  Cell|null  $previous  The previous cell's style (null = reset state)
      * @return string The ANSI escape sequence (empty string if no change needed)
      */
     public function getStyleTransition(?Cell $previous = null): string

@@ -460,6 +460,7 @@ class CellBuffer
             // Skip continuation cells (they don't render anything)
             if ($cell->isContinuation()) {
                 $previousCell = $cell;
+
                 continue;
             }
 

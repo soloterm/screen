@@ -127,7 +127,7 @@ class DifferentialRenderingTest extends TestCase
     {
         $screen = new Screen(80, 24);
 
-        $screen->write("Hello World");
+        $screen->write('Hello World');
         $screen->output();
         $seqNo = $screen->getLastRenderedSeqNo();
 
