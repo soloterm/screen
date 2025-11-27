@@ -251,7 +251,7 @@ class DifferentialRenderingTest extends TestCase
         $screen->write("Line 2\n");
         $screen->write("Line 3\n");
         $screen->write("Line 4\n");
-        $screen->write("Line 5");
+        $screen->write('Line 5');
 
         // Render and capture seqNo
         $screen->output();
@@ -280,7 +280,7 @@ class DifferentialRenderingTest extends TestCase
         $screen->write("BBB\n");
         $screen->write("CCC\n");
         $screen->write("DDD\n");
-        $screen->write("EEE");
+        $screen->write('EEE');
 
         $screen->output();
         $seqNo = $screen->getLastRenderedSeqNo();

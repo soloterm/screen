@@ -11,8 +11,8 @@ namespace SoloTerm\Screen\Tests\Unit;
 
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
-use SoloTerm\Screen\Cell;
 use SoloTerm\Screen\Buffers\CellBuffer;
+use SoloTerm\Screen\Cell;
 
 class CellBufferTest extends TestCase
 {
@@ -273,7 +273,7 @@ class CellBufferTest extends TestCase
     }
 
     #[Test]
-    public function row_hash_invalidated_on_setCell(): void
+    public function row_hash_invalidated_on_set_cell(): void
     {
         $buffer = new CellBuffer(10, 5);
         $buffer->writeChar(0, 0, 'A');
@@ -289,7 +289,7 @@ class CellBufferTest extends TestCase
     }
 
     #[Test]
-    public function row_hash_invalidated_on_writeChar(): void
+    public function row_hash_invalidated_on_write_char(): void
     {
         $buffer = new CellBuffer(10, 5);
         $buffer->writeChar(0, 0, 'A');
@@ -305,7 +305,7 @@ class CellBufferTest extends TestCase
     }
 
     #[Test]
-    public function row_hash_invalidated_on_writeContinuation(): void
+    public function row_hash_invalidated_on_write_continuation(): void
     {
         $buffer = new CellBuffer(10, 5);
         $buffer->writeChar(0, 0, 'A');
@@ -339,7 +339,7 @@ class CellBufferTest extends TestCase
     }
 
     #[Test]
-    public function row_hash_invalidated_on_clearLine(): void
+    public function row_hash_invalidated_on_clear_line(): void
     {
         $buffer = new CellBuffer(10, 5);
         $buffer->writeChar(0, 0, 'A');
