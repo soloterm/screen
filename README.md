@@ -115,7 +115,66 @@ Screen correctly interprets ANSI escape sequences for:
 - Screen clearing and line manipulation
 - Scrolling
 
+## Architecture
+
+Screen uses a dual-buffer architecture to separate content from styling:
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                            Screen                                │
+│                                                                  │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────────────┐   │
+│  │ AnsiParser  │───▶│    Proxy    │───▶│       Buffers       │   │
+│  │             │    │             │    │                     │   │
+│  │ Splits into │    │ Coordinates │    │  ┌───────────────┐  │   │
+│  │ text + ANSI │    │ writes to   │    │  │PrintableBuffer│  │   │
+│  └─────────────┘    │ both buffers│    │  │ (characters)  │  │   │
+│                     └─────────────┘    │  ├───────────────┤  │   │
+│                                        │  │  AnsiBuffer   │  │   │
+│                                        │  │   (styles)    │  │   │
+│                                        │  └───────────────┘  │   │
+│                                        └──────────┬──────────┘   │
+│                                                   │              │
+│                                                   ▼              │
+│                                        ┌─────────────────────┐   │
+│                                        │      output()       │   │
+│                                        │   Combines buffers  │   │
+│                                        │   into final ANSI   │   │
+│                                        └─────────────────────┘   │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+- **AnsiParser**: A state machine that splits input into printable text and ANSI escape sequences
+- **Proxy**: Coordinates writes to both buffers simultaneously, keeping them in sync
+- **PrintableBuffer**: Stores visible characters, handles grapheme clusters and wide character width calculations
+- **AnsiBuffer**: Stores styling as efficient bitmasks, with support for 256-color and RGB
+
+This separation allows Screen to efficiently track what changed and optimize rendering.
+
 ## Advanced features
+
+### Differential rendering
+
+For high-performance applications like TUIs with frequent updates, Screen supports differential rendering that only
+outputs changed lines:
+
+```php
+$screen = new Screen(80, 24);
+$screen->write("Initial content");
+
+// Get the full output and capture the sequence number
+$output = $screen->output();
+$seqNo = $screen->getLastRenderedSeqNo();
+
+// ... later, after some updates ...
+$screen->write("\e[5;1HUpdated line");
+
+// Only get the changed lines (with cursor positioning)
+$diff = $screen->output($seqNo);
+```
+
+This is particularly useful when building interfaces that update at high frame rates (e.g., 40 FPS) where
+re-rendering the entire screen would be wasteful.
 
 ### Cursor positioning
 
@@ -163,6 +222,76 @@ $screen->write("\e[2L");
 // Scroll up
 $screen->write("\e[2S");
 ```
+
+## Supported ANSI codes
+
+Screen supports a comprehensive set of ANSI escape sequences:
+
+### Cursor movement (CSI sequences)
+
+| Code | Name | Description |
+|------|------|-------------|
+| `ESC[nA` | CUU | Cursor up n lines |
+| `ESC[nB` | CUD | Cursor down n lines |
+| `ESC[nC` | CUF | Cursor forward n columns |
+| `ESC[nD` | CUB | Cursor backward n columns |
+| `ESC[nE` | CNL | Cursor to beginning of line, n lines down |
+| `ESC[nF` | CPL | Cursor to beginning of line, n lines up |
+| `ESC[nG` | CHA | Cursor to column n |
+| `ESC[n;mH` | CUP | Cursor to row n, column m |
+| `ESC[nI` | CHT | Cursor forward n tab stops |
+| `ESC7` | DECSC | Save cursor position |
+| `ESC8` | DECRC | Restore cursor position |
+
+### Erase functions
+
+| Code | Name | Description |
+|------|------|-------------|
+| `ESC[0J` | ED | Erase from cursor to end of screen |
+| `ESC[1J` | ED | Erase from start of screen to cursor |
+| `ESC[2J` | ED | Erase entire screen |
+| `ESC[0K` | EL | Erase from cursor to end of line |
+| `ESC[1K` | EL | Erase from start of line to cursor |
+| `ESC[2K` | EL | Erase entire line |
+
+### Scrolling
+
+| Code | Name | Description |
+|------|------|-------------|
+| `ESC[nS` | SU | Scroll up n lines |
+| `ESC[nT` | SD | Scroll down n lines |
+| `ESC[nL` | IL | Insert n lines at cursor |
+
+### Text styling (SGR - Select Graphic Rendition)
+
+| Code | Description |
+|------|-------------|
+| `0` | Reset all attributes |
+| `1` | Bold |
+| `2` | Dim |
+| `3` | Italic |
+| `4` | Underline |
+| `5` | Blink |
+| `7` | Reverse video |
+| `8` | Hidden |
+| `9` | Strikethrough |
+| `22` | Normal intensity (not bold/dim) |
+| `23` | Not italic |
+| `24` | Not underlined |
+| `25` | Not blinking |
+| `27` | Not reversed |
+| `28` | Not hidden |
+| `29` | Not strikethrough |
+| `30-37` | Foreground color (standard) |
+| `38;5;n` | Foreground color (256-color) |
+| `38;2;r;g;b` | Foreground color (RGB) |
+| `39` | Default foreground |
+| `40-47` | Background color (standard) |
+| `48;5;n` | Background color (256-color) |
+| `48;2;r;g;b` | Background color (RGB) |
+| `49` | Default background |
+| `90-97` | Foreground color (bright) |
+| `100-107` | Background color (bright) |
 
 ## Custom integrations
 
