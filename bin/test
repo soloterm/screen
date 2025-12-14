@@ -1,0 +1,99 @@
+#!/usr/bin/env php
+<?php
+
+/**
+ * Test runner with screenshot testing support.
+ *
+ * Usage:
+ *   composer test                      Run tests without screenshot generation
+ *   composer test -- --screenshots     Generate all screenshots/fixtures
+ *   composer test -- --missing         Generate only missing fixtures
+ */
+
+$args = array_slice($argv, 1);
+$phpunitArgs = [];
+
+$screenshots = false;
+$missingOnly = false;
+
+foreach ($args as $arg) {
+    if ($arg === '--screenshots' || $arg === '-s') {
+        $screenshots = true;
+    } elseif ($arg === '--missing' || $arg === '-m') {
+        $missingOnly = true;
+    } else {
+        $phpunitArgs[] = $arg;
+    }
+}
+
+// Set up environment for screenshot testing
+if ($screenshots || $missingOnly) {
+    // Required dimensions to match CI (see .github/workflows/tests.yml)
+    $requiredLines = 32;
+    $requiredColumns = 180;
+
+    // Screenshot testing requires iTerm on macOS
+    if (PHP_OS_FAMILY !== 'Darwin') {
+        fwrite(STDERR, "Screenshot testing is only supported on macOS with iTerm.\n");
+        exit(1);
+    }
+
+    if (getenv('TERM_PROGRAM') !== 'iTerm.app') {
+        fwrite(STDERR, "Screenshot testing requires iTerm. Current terminal: " . (getenv('TERM_PROGRAM') ?: 'unknown') . "\n");
+        exit(1);
+    }
+
+    // Resize iTerm to required dimensions
+    echo "Resizing iTerm to {$requiredColumns}x{$requiredLines}...\n";
+
+    $script = sprintf(
+        'tell application "iTerm2"
+            tell current session of current window
+                set columns to %d
+                set rows to %d
+            end tell
+        end tell',
+        $requiredColumns,
+        $requiredLines
+    );
+
+    exec('osascript -e ' . escapeshellarg($script) . ' 2>&1', $output, $exitCode);
+
+    if ($exitCode !== 0) {
+        fwrite(STDERR, "Failed to resize iTerm.\n");
+        exit(1);
+    }
+
+    // Give iTerm a moment to resize
+    usleep(200000); // 200ms
+
+    echo "iTerm resized. Starting tests...\n\n";
+
+    if ($missingOnly) {
+        putenv('ENABLE_SCREENSHOT_TESTING=2');
+    } else {
+        putenv('ENABLE_SCREENSHOT_TESTING=1');
+    }
+}
+
+// Build the command
+$command = 'vendor/bin/phpunit';
+if (!empty($phpunitArgs)) {
+    $command .= ' ' . implode(' ', array_map('escapeshellarg', $phpunitArgs));
+}
+
+// Execute phpunit
+$descriptors = [
+    0 => STDIN,
+    1 => STDOUT,
+    2 => STDERR,
+];
+
+$process = proc_open($command, $descriptors, $pipes);
+
+if (is_resource($process)) {
+    $exitCode = proc_close($process);
+    exit($exitCode);
+}
+
+exit(1);

@@ -128,9 +128,37 @@ trait ComparesVisually
 
     protected function writeFixtureFile($content)
     {
-        $this->ensureDirectoriesExist($this->fixturePath());
+        // Fixtures must be generated at the same dimensions as CI to ensure checksums match.
+        // CI uses LINES=32 COLUMNS=180 (see .github/workflows/tests.yml)
+        $requiredLines = 32;
+        $requiredColumns = 180;
 
         $screen = $this->makeIdenticalScreen();
+
+        if ($screen->height !== $requiredLines || $screen->width !== $requiredColumns) {
+            // Check if we're running in iTerm on macOS and can resize
+            if ($this->offerToResizeIterm($requiredLines, $requiredColumns)) {
+                // User accepted and resize was attempted, recreate screen with new dimensions
+                $screen = $this->makeIdenticalScreen();
+            }
+
+            // Check again after potential resize
+            if ($screen->height !== $requiredLines || $screen->width !== $requiredColumns) {
+                $this->fail(sprintf(
+                    "Fixtures must be generated with LINES=%d COLUMNS=%d to match CI.\n" .
+                    "Current dimensions: LINES=%d COLUMNS=%d\n" .
+                    "Run: LINES=%d COLUMNS=%d ENABLE_SCREENSHOT_TESTING=2 composer test",
+                    $requiredLines,
+                    $requiredColumns,
+                    $screen->height,
+                    $screen->width,
+                    $requiredLines,
+                    $requiredColumns
+                ));
+            }
+        }
+
+        $this->ensureDirectoriesExist($this->fixturePath());
 
         foreach ($content as $c) {
             $screen->write($c);
@@ -342,5 +370,69 @@ trait ComparesVisually
         (new ReflectionClass($terminal))->getMethod('initDimensions')->invoke($terminal);
 
         return new Screen($terminal->getWidth(), $terminal->getHeight());
+    }
+
+    /**
+     * Offer to resize iTerm to the required dimensions via AppleScript.
+     *
+     * @return bool True if resize was attempted, false otherwise.
+     */
+    protected function offerToResizeIterm(int $lines, int $columns): bool
+    {
+        // Only works on macOS with iTerm
+        if (PHP_OS_FAMILY !== 'Darwin') {
+            return false;
+        }
+
+        if (getenv('TERM_PROGRAM') !== 'iTerm.app') {
+            return false;
+        }
+
+        // Check if we've already asked (store in static to only ask once per test run)
+        static $userResponse = null;
+
+        if ($userResponse === false) {
+            return false;
+        }
+
+        if ($userResponse === null) {
+            echo "\n";
+            echo "Terminal dimensions don't match CI (need {$columns}x{$lines}).\n";
+            echo "Would you like to resize iTerm automatically? [Y/n] ";
+
+            $handle = fopen('php://stdin', 'r');
+            $input = trim(fgets($handle));
+            fclose($handle);
+
+            $userResponse = $input === '' || strtolower($input) === 'y';
+
+            if (!$userResponse) {
+                return false;
+            }
+        }
+
+        // Resize iTerm using AppleScript
+        $script = sprintf(
+            'tell application "iTerm2"
+                tell current session of current window
+                    set columns to %d
+                    set rows to %d
+                end tell
+            end tell',
+            $columns,
+            $lines
+        );
+
+        exec('osascript -e ' . escapeshellarg($script) . ' 2>&1', $output, $exitCode);
+
+        if ($exitCode === 0) {
+            // Give iTerm a moment to resize
+            usleep(100000); // 100ms
+            echo "iTerm resized to {$columns}x{$lines}.\n";
+            return true;
+        }
+
+        echo "Failed to resize iTerm.\n";
+        return false;
     }
 }

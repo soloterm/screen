@@ -244,16 +244,27 @@ scenarios involving:
 For environments without screenshot capabilities, tests can fall back to fixture-based comparison, making the test suite
 versatile for CI/CD pipelines.
 
-To enable screenshots for all tests, use the following command:
+### Generating fixtures
+
+Visual testing requires macOS with iTerm and ImageMagick installed. The test runner will automatically resize your
+iTerm window to the required dimensions (180x32) to match CI.
+
+To generate fixtures for tests that don't already have them:
 
 ```shell
-ENABLE_SCREENSHOT_TESTING=1 composer test
+composer test -- --missing
 ```
 
-To enable screenshots for only the tests that don't already have fixtures, use the following command:
+To regenerate all fixtures (useful when updating test expectations):
 
 ```shell
-ENABLE_SCREENSHOT_TESTING=2 composer test
+composer test -- --screenshots
+```
+
+You can combine these flags with PHPUnit options:
+
+```shell
+composer test -- --missing --filter="emoji"
 ```
 
 ## Contributing

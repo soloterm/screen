@@ -33,6 +33,9 @@
         ]
     },
     "scripts": {
-        "test": "vendor/bin/phpunit"
+        "test": "php bin/test"
+    },
+    "config": {
+        "process-timeout": 0
     }
 }

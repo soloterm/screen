@@ -11,3 +11,4 @@ node_modules
 tests/Screenshots
 
 .phpunit.cache/test-results
+.claude/settings.local.json
