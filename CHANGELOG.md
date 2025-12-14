@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.1] - 2025-12-14
+
+### Added
+
+- **Test runner script** - New `bin/test` script with `--screenshots` and `--missing` flags for easier fixture generation
+- **Automatic iTerm resizing** - Test runner automatically resizes iTerm to required dimensions (180x32) when generating fixtures
+- **PHP 8.5 support** - Added PHP 8.5 to the test matrix
+- **Enhanced README** - Added architecture diagram, differential rendering documentation, and comprehensive ANSI code reference
+
+### Changed
+
+- Test fixtures now require consistent dimensions (180x32) to match CI environment
+- CI now fails on main branch if any test fixtures are missing
+
+### Removed
+
+- Removed benchmark tests and their output from the test suite (cleaner test output)
+
 ## [1.1.0] - 2025-11-27
 
 ### Added
