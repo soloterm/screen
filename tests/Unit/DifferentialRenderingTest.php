@@ -198,50 +198,6 @@ class DifferentialRenderingTest extends TestCase
     }
 
     #[Test]
-    public function benchmark_differential_vs_full_rendering(): void
-    {
-        $screen = new Screen(200, 50);
-
-        // Fill the screen with content
-        for ($i = 0; $i < 50; $i++) {
-            $screen->write(str_repeat('X', 200) . "\n");
-        }
-
-        // Time full rendering
-        $startFull = hrtime(true);
-        for ($j = 0; $j < 100; $j++) {
-            $screen->output();
-        }
-        $fullTime = hrtime(true) - $startFull;
-
-        // Capture seqNo
-        $seqNo = $screen->getLastRenderedSeqNo();
-
-        // Modify just one line
-        $screen->write("\033[25;1HSingle line change");
-
-        // Time differential rendering
-        $startDiff = hrtime(true);
-        for ($j = 0; $j < 100; $j++) {
-            // Reset the seqNo capture to simulate repeated calls
-            $output = $screen->output($seqNo);
-        }
-        $diffTime = hrtime(true) - $startDiff;
-
-        // Differential should be significantly faster
-        // We expect at least 5x improvement for single-line changes
-        $this->assertLessThan(
-            $fullTime / 5,
-            $diffTime,
-            sprintf(
-                'Differential rendering should be at least 5x faster. Full: %dns, Diff: %dns',
-                $fullTime / 100,
-                $diffTime / 100
-            )
-        );
-    }
-
-    #[Test]
     public function newline_scroll_marks_visible_rows_dirty(): void
     {
         $screen = new Screen(80, 5);

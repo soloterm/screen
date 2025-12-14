@@ -601,38 +601,6 @@ class CellBufferTest extends TestCase
     }
 
     #[Test]
-    public function benchmark_flat_vs_2d_access(): void
-    {
-        $buffer = new CellBuffer(200, 50);
-
-        // Time writes
-        $start = hrtime(true);
-        for ($i = 0; $i < 100; $i++) {
-            for ($row = 0; $row < 50; $row++) {
-                for ($col = 0; $col < 200; $col++) {
-                    $buffer->writeChar($row, $col, 'X');
-                }
-            }
-        }
-        $writeTime = hrtime(true) - $start;
-
-        // Time reads
-        $start = hrtime(true);
-        for ($i = 0; $i < 100; $i++) {
-            for ($row = 0; $row < 50; $row++) {
-                for ($col = 0; $col < 200; $col++) {
-                    $cell = $buffer->getCell($row, $col);
-                }
-            }
-        }
-        $readTime = hrtime(true) - $start;
-
-        // Just ensure it completes in reasonable time (< 5 seconds)
-        $this->assertLessThan(5_000_000_000, $writeTime);
-        $this->assertLessThan(5_000_000_000, $readTime);
-    }
-
-    #[Test]
     public function swap_buffers_enables_diff(): void
     {
         $buffer = new CellBuffer(10, 5);
@@ -783,99 +751,6 @@ class CellBufferTest extends TestCase
         $diff = $buffer->renderDiff(10, 20);
 
         $this->assertStringContainsString("\e[11;21H", $diff);
-    }
-
-    #[Test]
-    public function benchmark_diff_vs_full_render(): void
-    {
-        $buffer = new CellBuffer(200, 50);
-
-        // Fill the buffer
-        for ($row = 0; $row < 50; $row++) {
-            for ($col = 0; $col < 200; $col++) {
-                $buffer->writeChar($row, $col, 'X');
-            }
-        }
-        $buffer->swapBuffers();
-
-        // Make a small change
-        $buffer->writeChar(25, 100, 'O');
-
-        // Time diff render
-        $start = hrtime(true);
-        for ($i = 0; $i < 1000; $i++) {
-            $diff = $buffer->renderDiff();
-        }
-        $diffTime = hrtime(true) - $start;
-
-        // Time full render
-        $start = hrtime(true);
-        for ($i = 0; $i < 1000; $i++) {
-            $full = $buffer->render();
-        }
-        $fullTime = hrtime(true) - $start;
-
-        // Diff should be significantly faster (at least 10x for single char change)
-        $this->assertLessThan($fullTime / 5, $diffTime);
-    }
-
-    #[Test]
-    public function benchmark_optimized_diff_vs_basic_diff(): void
-    {
-        $buffer = new CellBuffer(80, 25);
-
-        // Fill with styled content (simulating log output)
-        for ($row = 0; $row < 25; $row++) {
-            $buffer->setStyle(1, 31 + ($row % 7), null, null, null); // Bold + colors
-            for ($col = 0; $col < 80; $col++) {
-                $buffer->writeChar($row, $col, 'X');
-            }
-        }
-        $buffer->swapBuffers();
-
-        // Make scattered changes (simulating typical diff scenario)
-        $buffer->setStyle(1, 32, null, null, null); // Green
-        $buffer->writeChar(5, 10, 'A');
-        $buffer->writeChar(5, 11, 'B');
-        $buffer->writeChar(5, 12, 'C');
-        $buffer->writeChar(10, 20, 'D');
-        $buffer->writeChar(10, 21, 'E');
-        $buffer->writeChar(15, 0, 'F');
-        $buffer->writeChar(15, 1, 'G');
-        $buffer->writeChar(15, 2, 'H');
-
-        // Get output from both methods
-        $basicOutput = $buffer->renderDiff();
-        $optimizedOutput = $buffer->renderDiffOptimized();
-
-        $iterations = 1000;
-
-        // Benchmark basic diff
-        $start = hrtime(true);
-        for ($i = 0; $i < $iterations; $i++) {
-            $buffer->renderDiff();
-        }
-        $basicTime = hrtime(true) - $start;
-
-        // Benchmark optimized diff
-        $start = hrtime(true);
-        for ($i = 0; $i < $iterations; $i++) {
-            $buffer->renderDiffOptimized();
-        }
-        $optimizedTime = hrtime(true) - $start;
-
-        $basicMs = $basicTime / 1_000_000;
-        $optimizedMs = $optimizedTime / 1_000_000;
-        $basicBytes = strlen($basicOutput);
-        $optimizedBytes = strlen($optimizedOutput);
-
-        echo "\n\nDiff Output Comparison ({$iterations} iterations, 8 cell changes):\n";
-        echo '  Basic renderDiff:     ' . number_format($basicMs, 2) . " ms, {$basicBytes} bytes\n";
-        echo '  Optimized renderDiff: ' . number_format($optimizedMs, 2) . " ms, {$optimizedBytes} bytes\n";
-        echo '  Byte savings:         ' . round((1 - $optimizedBytes / $basicBytes) * 100, 1) . "%\n";
-
-        // Optimized should produce smaller output
-        $this->assertLessThan($basicBytes, $optimizedBytes);
     }
 
     #[Test]

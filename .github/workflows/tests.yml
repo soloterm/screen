@@ -45,4 +45,11 @@ jobs:
         env:
           LINES: 32
           COLUMNS: 180
-        run: vendor/bin/phpunit
+        run: |
+          vendor/bin/phpunit 2>&1 | tee phpunit-output.txt
+          TEST_EXIT_CODE=${PIPESTATUS[0]}
+          if [ "${{ github.ref }}" = "refs/heads/main" ] && grep -q "Fixture with correct content does not exist" phpunit-output.txt; then
+            echo "::error::Tests on main branch have missing fixtures. All fixtures must be generated before release."
+            exit 1
+          fi
+          exit $TEST_EXIT_CODE

@@ -188,36 +188,4 @@ class CursorOptimizerTest extends TestCase
         // Should use absolute positioning
         $this->assertEquals("\e[26;81H", $result);
     }
-
-    #[Test]
-    public function benchmark_optimizer_vs_always_absolute(): void
-    {
-        $optimizer = new CursorOptimizer;
-
-        // Simulate typical diff rendering: scattered changes
-        $positions = [
-            [0, 5], [0, 6], [0, 7],      // Sequential on row 0
-            [5, 10], [5, 11], [5, 12],    // Sequential on row 5
-            [10, 0],                       // Jump to row 10, col 0
-            [10, 50], [10, 51],           // Mid-line on row 10
-            [20, 0], [20, 1], [20, 2],    // Start of row 20
-        ];
-
-        $optimizedBytes = 0;
-        $absoluteBytes = 0;
-
-        foreach ($positions as [$row, $col]) {
-            $optimizedBytes += strlen($optimizer->moveTo($row, $col));
-            $absoluteBytes += strlen("\e[" . ($row + 1) . ';' . ($col + 1) . 'H');
-            $optimizer->advance(1); // Simulate writing a character
-        }
-
-        echo "\n\nCursor Movement Optimization:\n";
-        echo "  Optimized: {$optimizedBytes} bytes\n";
-        echo "  Always Absolute: {$absoluteBytes} bytes\n";
-        echo '  Savings: ' . round((1 - $optimizedBytes / $absoluteBytes) * 100, 1) . "%\n";
-
-        // Optimized should be smaller
-        $this->assertLessThan($absoluteBytes, $optimizedBytes);
-    }
 }

@@ -120,7 +120,3 @@ All optimizations are covered by unit tests:
 - `tests/Unit/CursorOptimizerTest.php` - 17 tests
 - `tests/Unit/StyleTrackerTest.php` - 16 tests
 
-Run benchmarks:
-```bash
-./vendor/bin/phpunit --filter "Benchmark"
-```
