@@ -147,7 +147,7 @@ trait ComparesVisually
                 $this->fail(sprintf(
                     "Fixtures must be generated with LINES=%d COLUMNS=%d to match CI.\n" .
                     "Current dimensions: LINES=%d COLUMNS=%d\n" .
-                    "Run: LINES=%d COLUMNS=%d ENABLE_SCREENSHOT_TESTING=2 composer test",
+                    'Run: LINES=%d COLUMNS=%d ENABLE_SCREENSHOT_TESTING=2 composer test',
                     $requiredLines,
                     $requiredColumns,
                     $screen->height,
@@ -398,7 +398,7 @@ trait ComparesVisually
         if ($userResponse === null) {
             echo "\n";
             echo "Terminal dimensions don't match CI (need {$columns}x{$lines}).\n";
-            echo "Would you like to resize iTerm automatically? [Y/n] ";
+            echo 'Would you like to resize iTerm automatically? [Y/n] ';
 
             $handle = fopen('php://stdin', 'r');
             $input = trim(fgets($handle));
@@ -429,10 +429,12 @@ trait ComparesVisually
             // Give iTerm a moment to resize
             usleep(100000); // 100ms
             echo "iTerm resized to {$columns}x{$lines}.\n";
+
             return true;
         }
 
         echo "Failed to resize iTerm.\n";
+
         return false;
     }
 }
