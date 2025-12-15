@@ -353,9 +353,12 @@ composer test
 ### Visual testing
 
 Screen employs an innovative screenshot-based testing approach (see `ComparesVisually` trait) that validates the visual
-output:
+output against real terminal behavior. The system supports both **iTerm2** and **Ghostty** terminals to ensure
+cross-terminal compatibility.
 
-1. The test renders content in a real terminal (iTerm)
+How it works:
+
+1. The test renders content in a real terminal (iTerm2 or Ghostty)
 2. It captures a screenshot of the terminal output
 3. It runs the same content through the Screen renderer
 4. It captures a screenshot of the rendered output
@@ -369,32 +372,86 @@ scenarios involving:
 - Cursor movements
 - Scrolling behavior
 - Line wrapping
+- Terminal-specific edge cases (like pending wrap state)
 
 For environments without screenshot capabilities, tests can fall back to fixture-based comparison, making the test suite
 versatile for CI/CD pipelines.
 
 ### Generating fixtures
 
-Visual testing requires macOS with iTerm and ImageMagick installed. The test runner will automatically resize your
-iTerm window to the required dimensions (180x32) to match CI.
+Visual testing requires macOS with iTerm2 or Ghostty and ImageMagick installed. The test runner will automatically
+resize your terminal window to the required dimensions (180x32) to match CI.
+
+#### Available test commands
+
+| Command | Description |
+|---------|-------------|
+| `composer test` | Run tests without screenshot generation |
+| `composer test:screenshots` | Generate all fixtures (auto-detects terminal) |
+| `composer test:missing` | Generate only missing fixtures |
+| `composer test:iterm` | Force iTerm2 for screenshot testing |
+| `composer test:ghostty` | Force Ghostty for screenshot testing |
+
+#### Examples
 
 To generate fixtures for tests that don't already have them:
 
 ```shell
-composer test -- --missing
+composer test:missing
 ```
 
 To regenerate all fixtures (useful when updating test expectations):
 
 ```shell
-composer test -- --screenshots
+composer test:screenshots
 ```
 
-You can combine these flags with PHPUnit options:
+To generate fixtures specifically for Ghostty:
 
 ```shell
-composer test -- --missing --filter="emoji"
+composer test:ghostty
 ```
+
+You can pass PHPUnit options (like `--filter`) to any test command using `--`:
+
+```shell
+# Run only emoji tests with screenshots in the current terminal
+composer test:screenshots -- --filter="emoji"
+
+# Generate missing iTerm fixtures for a specific test class
+composer test:iterm -- --filter="MultibyteTest"
+
+# Run Ghostty screenshot tests for vtail only
+composer test:ghostty -- --filter="vtail"
+```
+
+### Fixture structure
+
+Fixtures are stored per-terminal to account for rendering differences:
+
+```
+tests/Fixtures/
+├── iterm/           # iTerm2-specific fixtures
+│   └── Unit/
+│       └── TestClass/
+│           └── test_name.json
+├── ghostty/         # Ghostty-specific fixtures
+│   └── Unit/
+│       └── ...
+└── Unit/            # Legacy/fallback fixtures
+    └── ...
+```
+
+When running tests, the system will:
+1. Look for terminal-specific fixtures first (when the terminal is detected)
+2. Fall back to legacy fixtures in `tests/Fixtures/Unit/` for backward compatibility
+
+### Environment variables
+
+| Variable | Description |
+|----------|-------------|
+| `ENABLE_SCREENSHOT_TESTING` | Set to `1` for full screenshot testing, `2` for missing-only |
+| `SCREENSHOT_TERMINAL` | Force a specific terminal (`iterm` or `ghostty`) |
 
 ## Contributing
 
@@ -408,10 +465,8 @@ The MIT License (MIT).
 
 This is free! If you want to support me:
 
-- Sponsor my open source work: [aaronfrancis.com/backstage](https://aaronfrancis.com/backstage)
 - Check out my courses:
-    - [Mastering Postgres](https://masteringpostgres.com)
-    - [High Performance SQLite](https://highperformancesqlite.com)
+    - [Database School](https://databaseschool.com)
     - [Screencasting](https://screencasting.com)
 - Help spread the word about things I make
 

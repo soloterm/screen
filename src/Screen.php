@@ -124,17 +124,47 @@ class Screen
     }
 
     /**
-     * Render all lines, joined by newlines. Original output behavior.
+     * Render all lines using relative cursor positioning.
+     *
+     * Uses DECSC/DECRC (save/restore cursor) combined with CUD (cursor down)
+     * to position each line relative to where the caller placed the cursor.
+     * This approach:
+     * - Avoids "pending wrap" issues (different terminals handle full-width
+     *   lines differently when using \n)
+     * - Uses relative positioning so Screen output can be rendered at any
+     *   offset in a parent TUI (unlike \r which always goes to column 1)
+     * - Never uses \n between lines, so wrap semantics don't matter
      */
     protected function outputFull(array $ansi, array $printable): string
     {
-        $outputLines = [];
+        $parts = [];
+
+        // Save the caller's current cursor position as the Screen origin.
+        // DECSC (DEC Save Cursor) - ESC 7
+        $parts[] = "\0337";
 
         foreach ($printable as $lineIndex => $line) {
-            $outputLines[] = $this->renderLine($lineIndex, $line, $ansi[$lineIndex] ?? []);
+            $visibleRow = $lineIndex - $this->linesOffScreen + 1;
+
+            if ($visibleRow < 1 || $visibleRow > $this->height) {
+                continue;
+            }
+
+            // Restore to origin (top-left of this Screen in the parent TUI).
+            // DECRC (DEC Restore Cursor) - ESC 8
+            $parts[] = "\0338";
+
+            // Move down to this line's row (relative) from the origin.
+            // visibleRow is 1-based, so visibleRow=1 is the origin row (no movement needed).
+            if ($visibleRow > 1) {
+                $parts[] = "\033[" . ($visibleRow - 1) . "B"; // CUD (cursor down)
+            }
+
+            // Render the line content. No newline afterwards.
+            $parts[] = $this->renderLine($lineIndex, $line, $ansi[$lineIndex] ?? []);
         }
 
-        return implode(PHP_EOL, $outputLines);
+        return implode('', $parts);
     }
 
     /**

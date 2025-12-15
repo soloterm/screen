@@ -2,12 +2,15 @@
 <?php
 
 /**
- * Test runner with screenshot testing support.
+ * Test runner with screenshot testing support for multiple terminals.
  *
  * Usage:
- *   composer test                      Run tests without screenshot generation
- *   composer test -- --screenshots     Generate all screenshots/fixtures
- *   composer test -- --missing         Generate only missing fixtures
+ *   composer test                    Run tests without screenshot generation
+ *   composer test:screenshots        Generate all screenshots/fixtures (requires iTerm or Ghostty)
+ *   composer test:missing            Generate only missing fixtures
+ *
+ * Screenshot tests must be run in the correct terminal (iTerm or Ghostty).
+ * Fixtures are stored per-terminal in tests/Fixtures/{iterm|ghostty}/...
  */
 
 $args = array_slice($argv, 1);
@@ -32,42 +35,68 @@ if ($screenshots || $missingOnly) {
     $requiredLines = 32;
     $requiredColumns = 180;
 
-    // Screenshot testing requires iTerm on macOS
+    // Screenshot testing requires macOS
     if (PHP_OS_FAMILY !== 'Darwin') {
-        fwrite(STDERR, "Screenshot testing is only supported on macOS with iTerm.\n");
+        fwrite(STDERR, "Screenshot testing is only supported on macOS.\n");
         exit(1);
     }
 
-    if (getenv('TERM_PROGRAM') !== 'iTerm.app') {
-        fwrite(STDERR, "Screenshot testing requires iTerm. Current terminal: " . (getenv('TERM_PROGRAM') ?: 'unknown') . "\n");
+    // Detect terminal - no override allowed
+    $terminal = detectTerminal();
+
+    if (!$terminal) {
+        fwrite(STDERR, "Screenshot testing requires iTerm or Ghostty.\n");
+        fwrite(STDERR, "Current terminal: " . (getenv('TERM_PROGRAM') ?: 'unknown') . "\n");
+        fwrite(STDERR, "\n");
+        fwrite(STDERR, "Please run this command directly in iTerm or Ghostty.\n");
         exit(1);
     }
 
-    // Resize iTerm to required dimensions
-    echo "Resizing iTerm to {$requiredColumns}x{$requiredLines}...\n";
+    echo "Detected {$terminal} for screenshot testing.\n";
 
-    $script = sprintf(
-        'tell application "iTerm2"
-            tell current session of current window
-                set columns to %d
-                set rows to %d
-            end tell
-        end tell',
-        $requiredColumns,
-        $requiredLines
-    );
+    if ($terminal === 'iterm') {
+        echo "Resizing iTerm to {$requiredColumns}x{$requiredLines}...\n";
 
-    exec('osascript -e ' . escapeshellarg($script) . ' 2>&1', $output, $exitCode);
+        $resized = resizeIterm($requiredLines, $requiredColumns);
 
-    if ($exitCode !== 0) {
-        fwrite(STDERR, "Failed to resize iTerm.\n");
-        exit(1);
+        if (!$resized) {
+            fwrite(STDERR, "Failed to resize iTerm. Please resize manually.\n");
+            exit(1);
+        }
+
+        // Give terminal time to resize
+        usleep(200000); // 200ms
+
+        echo "iTerm resized. Starting tests...\n\n";
+    } else {
+        // Check if Ghostty is already at the correct size
+        $currentCols = (int) trim((string) shell_exec('tput cols'));
+        $currentLines = (int) trim((string) shell_exec('tput lines'));
+
+        if ($currentCols === $requiredColumns && $currentLines === $requiredLines) {
+            echo "Ghostty already at correct size ({$requiredColumns}x{$requiredLines}). Starting tests...\n\n";
+        } else {
+            // Ghostty doesn't support programmatic resize, ask user to do it manually
+            echo "\n";
+            echo "═══════════════════════════════════════════════════════════════════════════════\n";
+            echo "  Please resize your Ghostty terminal to:\n";
+            echo "\n";
+            echo "    Columns: {$requiredColumns}  (current: {$currentCols})\n";
+            echo "    Rows:    {$requiredLines}  (current: {$currentLines})\n";
+            echo "\n";
+            echo "  You can check current size with: tput cols && tput lines\n";
+            echo "═══════════════════════════════════════════════════════════════════════════════\n";
+            echo "\n";
+            echo "Press any key when ready...";
+
+            // Wait for keypress
+            system('stty cbreak -echo');
+            fgetc(STDIN);
+            system('stty sane');
+
+            echo "\n\nStarting tests...\n\n";
+        }
     }
-
-    // Give iTerm a moment to resize
-    usleep(200000); // 200ms
-
-    echo "iTerm resized. Starting tests...\n\n";
 
     if ($missingOnly) {
         putenv('ENABLE_SCREENSHOT_TESTING=2');
@@ -82,18 +111,50 @@ if (!empty($phpunitArgs)) {
     $command .= ' ' . implode(' ', array_map('escapeshellarg', $phpunitArgs));
 }
 
-// Execute phpunit
-$descriptors = [
-    0 => STDIN,
-    1 => STDOUT,
-    2 => STDERR,
-];
-
-$process = proc_open($command, $descriptors, $pipes);
-
-if (is_resource($process)) {
-    $exitCode = proc_close($process);
-    exit($exitCode);
+// Show what we're running when in screenshot mode (helpful for debugging)
+if ($screenshots || $missingOnly) {
+    echo "Running: {$command}\n\n";
 }
 
-exit(1);
+// Execute phpunit
+passthru($command, $exitCode);
+exit($exitCode);
+
+/**
+ * Detect the current terminal emulator.
+ */
+function detectTerminal(): ?string
+{
+    $termProgram = getenv('TERM_PROGRAM');
+
+    if ($termProgram === 'iTerm.app') {
+        return 'iterm';
+    }
+
+    if ($termProgram === 'ghostty') {
+        return 'ghostty';
+    }
+
+    return null;
+}
+
+/**
+ * Resize iTerm to the required dimensions via AppleScript.
+ */
+function resizeIterm(int $lines, int $columns): bool
+{
+    $script = sprintf(
+        'tell application "iTerm2"
+            tell current session of current window
+                set columns to %d
+                set rows to %d
+            end tell
+        end tell',
+        $columns,
+        $lines
+    );
+
+    exec('osascript -e ' . escapeshellarg($script) . ' 2>&1', $output, $exitCode);
+
+    return $exitCode === 0;
+}

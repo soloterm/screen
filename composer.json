@@ -33,7 +33,9 @@
         ]
     },
     "scripts": {
-        "test": "php bin/test"
+        "test": "php bin/test",
+        "test:screenshots": "php bin/test --screenshots",
+        "test:missing": "php bin/test --missing"
     },
     "config": {
         "process-timeout": 0

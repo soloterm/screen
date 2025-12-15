@@ -53,3 +53,88 @@ jobs:
             exit 1
           fi
           exit $TEST_EXIT_CODE
+
+      - name: Validate terminal fixtures match
+        if: always()
+        run: |
+          # Check that visual test fixtures exist for both terminals and have identical content
+          ERRORS=0
+          
+          # Check screenshot fixtures (tests/Fixtures/{iterm,ghostty}/...)
+          if [ -d "tests/Fixtures/iterm" ] || [ -d "tests/Fixtures/ghostty" ]; then
+            echo "Checking screenshot fixtures..."
+            
+            # Find all iterm fixtures and verify ghostty equivalents exist and match
+            if [ -d "tests/Fixtures/iterm" ]; then
+              find tests/Fixtures/iterm -name "*.json" -type f | while read iterm_file; do
+                ghostty_file="${iterm_file/iterm/ghostty}"
+                rel_path="${iterm_file#tests/Fixtures/iterm/}"
+                
+                if [ ! -f "$ghostty_file" ]; then
+                  echo "::error::Missing Ghostty fixture for: $rel_path"
+                  ERRORS=$((ERRORS + 1))
+                elif ! diff -q "$iterm_file" "$ghostty_file" > /dev/null 2>&1; then
+                  echo "::error::Fixture mismatch between terminals for: $rel_path"
+                  echo "  iTerm and Ghostty fixtures must have identical content."
+                  echo "  This indicates the rendering differs between terminals."
+                  ERRORS=$((ERRORS + 1))
+                fi
+              done
+            fi
+            
+            # Find ghostty fixtures without iterm equivalents
+            if [ -d "tests/Fixtures/ghostty" ]; then
+              find tests/Fixtures/ghostty -name "*.json" -type f | while read ghostty_file; do
+                iterm_file="${ghostty_file/ghostty/iterm}"
+                rel_path="${ghostty_file#tests/Fixtures/ghostty/}"
+                
+                if [ ! -f "$iterm_file" ]; then
+                  echo "::error::Missing iTerm fixture for: $rel_path"
+                  ERRORS=$((ERRORS + 1))
+                fi
+              done
+            fi
+          fi
+          
+          # Check render fixtures (tests/Fixtures/Renders/{iterm,ghostty}/...)
+          if [ -d "tests/Fixtures/Renders/iterm" ] || [ -d "tests/Fixtures/Renders/ghostty" ]; then
+            echo "Checking render fixtures..."
+            
+            if [ -d "tests/Fixtures/Renders/iterm" ]; then
+              find tests/Fixtures/Renders/iterm -name "*.json" -type f | while read iterm_file; do
+                ghostty_file="${iterm_file/iterm/ghostty}"
+                rel_path="${iterm_file#tests/Fixtures/Renders/iterm/}"
+                
+                if [ ! -f "$ghostty_file" ]; then
+                  echo "::error::Missing Ghostty render fixture for: $rel_path"
+                  ERRORS=$((ERRORS + 1))
+                elif ! diff -q "$iterm_file" "$ghostty_file" > /dev/null 2>&1; then
+                  echo "::error::Render fixture mismatch between terminals for: $rel_path"
+                  echo "  iTerm and Ghostty fixtures must have identical content."
+                  ERRORS=$((ERRORS + 1))
+                fi
+              done
+            fi
+            
+            if [ -d "tests/Fixtures/Renders/ghostty" ]; then
+              find tests/Fixtures/Renders/ghostty -name "*.json" -type f | while read ghostty_file; do
+                iterm_file="${ghostty_file/ghostty/iterm}"
+                rel_path="${ghostty_file#tests/Fixtures/Renders/ghostty/}"
+                
+                if [ ! -f "$iterm_file" ]; then
+                  echo "::error::Missing iTerm render fixture for: $rel_path"
+                  ERRORS=$((ERRORS + 1))
+                fi
+              done
+            fi
+          fi
+          
+          if [ $ERRORS -gt 0 ]; then
+            echo ""
+            echo "::error::Found $ERRORS fixture validation errors."
+            echo "All visual tests must be run in both iTerm and Ghostty."
+            echo "Fixtures must produce identical output in both terminals."
+            exit 1
+          fi
+          
+          echo "All terminal fixtures validated successfully."
