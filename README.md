@@ -51,6 +51,7 @@ that can be used in any PHP application requiring terminal rendering.
 - **Buffer Management**: Maintains separate buffers for text content and styling
 - **Character Width Handling**: Correctly calculates display width for CJK and other double-width characters
 - **Scrolling**: Support for vertical scrolling with proper content management
+- **Relative Positioning**: Output can be rendered at any position in a parent TUI without interference
 
 ## Installation
 
@@ -152,6 +153,65 @@ Screen uses a dual-buffer architecture to separate content from styling:
 This separation allows Screen to efficiently track what changed and optimize rendering.
 
 ## Advanced features
+
+### Rendering at arbitrary positions (popup windows, panels)
+
+When building TUIs with multiple Screen instances rendered at different positions (like popup windows or panels), you
+need to handle cursor positioning carefully. Screen's `output()` method uses **relative cursor positioning** to avoid
+the "pending wrap state" problem that causes rendering issues across different terminals.
+
+#### The pending wrap problem
+
+When a line is filled to exactly the terminal width, terminals enter a "pending wrap" state. The behavior of `\n` and
+`\r` in this state varies between terminal emulators:
+
+- **iTerm2**: A newline after a full line moves down one row
+- **Ghostty**: May move down two rows or position content incorrectly
+
+This inconsistency can cause content to appear offset by an entire screen width in some terminals.
+
+#### How Screen solves this
+
+Screen's `output()` method uses DEC save/restore cursor (DECSC/DECRC) with cursor down (CUD) sequences instead of
+newlines:
+
+```
+ESC 7           Save cursor position (origin point)
+[line 1 content]
+ESC 8           Restore to origin
+ESC [1B         Move down 1 row
+[line 2 content]
+ESC 8           Restore to origin  
+ESC [2B         Move down 2 rows
+[line 3 content]
+...
+```
+
+This approach:
+- **Avoids pending wrap entirely** — no `\n` characters between lines means wrap state doesn't matter
+- **Uses relative positioning** — output renders correctly at any cursor position in a parent TUI
+- **Works consistently** — same behavior in iTerm2, Ghostty, and other terminals
+
+#### Rendering a Screen at a specific position
+
+To render a Screen at a specific position in your TUI:
+
+```php
+use SoloTerm\Screen\Screen;
+
+// Create a screen for a popup/panel
+$popup = new Screen(40, 10);
+$popup->write("Popup content here...");
+
+// Position the parent terminal's cursor where you want the popup
+echo "\e[5;20H";  // Move to row 5, column 20
+
+// Render the popup - it will use relative positioning from this point
+echo $popup->output();
+```
+
+The Screen will render its content starting from wherever the cursor is positioned, with each line placed relative to
+that origin point.
 
 ### Differential rendering
 
@@ -344,24 +404,37 @@ $screen->write("\nEmoji: 🚀 👨‍👩‍👧‍👦 🌍");
 
 ## Testing
 
-Screen includes a comprehensive testing suite that features a unique visual comparison system:
+Screen includes a comprehensive test suite with visual comparison testing that validates output against real terminal
+behavior.
 
 ```shell
 composer test
 ```
 
+### Available test commands
+
+| Command | Description |
+|---------|-------------|
+| `composer test` | Run tests without screenshot generation |
+| `composer test:screenshots` | Generate all fixtures (requires iTerm or Ghostty) |
+| `composer test:missing` | Generate only missing or out-of-sync fixtures |
+| `composer test:failures` | Re-run failed tests first, stop on first failure |
+| `composer test:fixtures` | Validate fixture integrity across terminals |
+
+You can pass additional PHPUnit options using `--`:
+
+```shell
+# Run only emoji tests with screenshots
+composer test:screenshots -- --filter="emoji"
+
+# Generate missing fixtures for a specific test class
+composer test:missing -- --filter="MultibyteTest"
+```
+
 ### Visual testing
 
-Screen employs an innovative screenshot-based testing approach that validates the visual output against real terminal 
-behavior. The system supports both **iTerm2** and **Ghostty** terminals to ensure cross-terminal compatibility.
-
-The visual testing system is built from focused components:
-
-- `ComparesVisually` trait — Test API facade (~200 lines)
-- `VisualTestConfig` — Environment detection and mode configuration
-- `ScreenshotSession` — Screenshot capture and comparison
-- `VisualFixtureStore` — Fixture I/O and checksums
-- `capture-window.swift` — Native macOS screenshot capture using `CGWindowListCreateImage`
+Screen employs screenshot-based testing that compares rendered output against real terminal behavior. The system
+supports both **iTerm2** and **Ghostty** terminals to ensure cross-terminal compatibility.
 
 How it works:
 
@@ -371,66 +444,23 @@ How it works:
 4. It captures another screenshot
 5. It compares the screenshots pixel-by-pixel using ImageMagick
 
-This testing strategy ensures that Screen's rendering accurately matches real terminal behavior, especially for complex
-scenarios involving:
+This ensures Screen's rendering accurately matches real terminal behavior for:
 
-- Multi-byte characters
+- Multi-byte characters and emoji
 - Complex ANSI formatting
-- Cursor movements
+- Cursor movements and positioning
 - Scrolling behavior
 - Line wrapping
 - Terminal-specific edge cases (like pending wrap state)
 
-For environments without screenshot capabilities, tests can fall back to fixture-based comparison, making the test suite
-versatile for CI/CD pipelines.
+### Requirements for visual testing
 
-### Generating fixtures
+- macOS
+- iTerm2 or Ghostty terminal
+- ImageMagick (`brew install imagemagick`)
 
-Visual testing requires macOS with iTerm2 or Ghostty and ImageMagick installed. The test runner will automatically
-resize your terminal window to the required dimensions (180x32) to match CI.
-
-#### Available test commands
-
-| Command | Description |
-|---------|-------------|
-| `composer test` | Run tests without screenshot generation |
-| `composer test:screenshots` | Generate all fixtures (auto-detects terminal) |
-| `composer test:missing` | Generate only missing fixtures |
-| `composer test:iterm` | Force iTerm2 for screenshot testing |
-| `composer test:ghostty` | Force Ghostty for screenshot testing |
-
-#### Examples
-
-To generate fixtures for tests that don't already have them:
-
-```shell
-composer test:missing
-```
-
-To regenerate all fixtures (useful when updating test expectations):
-
-```shell
-composer test:screenshots
-```
-
-To generate fixtures specifically for Ghostty:
-
-```shell
-composer test:ghostty
-```
-
-You can pass PHPUnit options (like `--filter`) to any test command using `--`:
-
-```shell
-# Run only emoji tests with screenshots in the current terminal
-composer test:screenshots -- --filter="emoji"
-
-# Generate missing iTerm fixtures for a specific test class
-composer test:iterm -- --filter="MultibyteTest"
-
-# Run Ghostty screenshot tests for vtail only
-composer test:ghostty -- --filter="vtail"
-```
+The test runner will automatically resize your terminal window to the required dimensions (180x32) for iTerm. For
+Ghostty, you'll be prompted to resize manually.
 
 ### Fixture structure
 
@@ -449,16 +479,8 @@ tests/Fixtures/
     └── ...
 ```
 
-When running tests, the system will:
-1. Look for terminal-specific fixtures first (when the terminal is detected)
-2. Fall back to legacy fixtures in `tests/Fixtures/Unit/` for backward compatibility
-
-### Environment variables
-
-| Variable | Description |
-|----------|-------------|
-| `ENABLE_SCREENSHOT_TESTING` | Set to `1` for full screenshot testing, `2` for missing-only |
-| `SCREENSHOT_TERMINAL` | Force a specific terminal (`iterm` or `ghostty`) |
+When running tests without screenshot generation, the system uses stored fixtures for comparison, making tests fast and
+suitable for CI/CD pipelines.
 
 ## Contributing
 
