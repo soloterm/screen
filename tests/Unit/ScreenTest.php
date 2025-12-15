@@ -305,7 +305,12 @@ class ScreenTest extends TestCase
         $screen->write('Test');
         $screen->writeln('New');
 
-        $this->assertEquals("Test\nNew\n", $screen->output());
+        // Verify content is on correct lines and cursor moved after writeln
+        $buffer = $screen->printable->getBuffer();
+        $this->assertEquals('Test', implode('', $buffer[0]));
+        $this->assertEquals('New', implode('', $buffer[1]));
+        $this->assertEquals(2, $screen->cursorRow);
+        $this->assertEquals(0, $screen->cursorCol);
     }
 
     #[Test]
@@ -317,7 +322,12 @@ class ScreenTest extends TestCase
         $screen->write("Test\n");
         $screen->writeln('New');
 
-        $this->assertEquals("Test\nNew\n", $screen->output());
+        // Verify content is on correct lines and cursor moved after writeln
+        $buffer = $screen->printable->getBuffer();
+        $this->assertEquals('Test', implode('', $buffer[0]));
+        $this->assertEquals('New', implode('', $buffer[1]));
+        $this->assertEquals(2, $screen->cursorRow);
+        $this->assertEquals(0, $screen->cursorCol);
     }
 
     #[Test]
@@ -359,8 +369,10 @@ class ScreenTest extends TestCase
     {
         $screen = new Screen(180, 30);
         $screen->write("Test\n\n");
-        // Can't see trailing newlines, so test the output directly
-        $this->assertEquals("Test\n\n", $screen->output());
+        // Can't see trailing newlines, so verify cursor position instead
+        // "Test" on row 0, then two newlines move cursor to row 2, col 0
+        $this->assertEquals(2, $screen->cursorRow);
+        $this->assertEquals(0, $screen->cursorCol);
     }
 
     #[Test]
@@ -466,21 +478,16 @@ class ScreenTest extends TestCase
         $screen->write("1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11");
         $screen->write("\e[2J");
 
-        $this->assertEquals(
-            '1
-
-
-
-
-
-
-
-
-
-',
-            $screen->output()
-        );
+        // Clear (ESC[2J) should clear visible screen but not scrollback
+        // Line 0 ("1") scrolled off screen and should be preserved
+        $buffer = $screen->printable->getBuffer();
+        $this->assertEquals('1', implode('', $buffer[0]));
+        // Visible lines (1-10) should be cleared
+        for ($i = 1; $i <= 10; $i++) {
+            $this->assertEquals('', implode('', $buffer[$i] ?? []), "Line $i should be empty");
+        }
     }
+
 
     #[Test]
     public function stash_restore_off_screen()

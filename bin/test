@@ -7,7 +7,8 @@
  * Usage:
  *   composer test                    Run tests without screenshot generation
  *   composer test:screenshots        Generate all screenshots/fixtures (requires iTerm or Ghostty)
- *   composer test:missing            Generate only missing fixtures
+ *   composer test:missing            Generate missing fixtures or regenerate out-of-sync fixtures
+ *   composer test:fixtures           Validate fixtures are in sync between terminals
  *
  * Screenshot tests must be run in the correct terminal (iTerm or Ghostty).
  * Fixtures are stored per-terminal in tests/Fixtures/{iterm|ghostty}/...
@@ -18,9 +19,17 @@ $phpunitArgs = [];
 
 $screenshots = false;
 $missingOnly = false;
+$passthrough = false;
 
 foreach ($args as $arg) {
-    if ($arg === '--screenshots' || $arg === '-s') {
+    if ($arg === '--') {
+        $passthrough = true;
+        continue;
+    }
+
+    if ($passthrough) {
+        $phpunitArgs[] = $arg;
+    } elseif ($arg === '--screenshots' || $arg === '-s') {
         $screenshots = true;
     } elseif ($arg === '--missing' || $arg === '-m') {
         $missingOnly = true;

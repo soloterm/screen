@@ -46,12 +46,26 @@ tests/Fixtures/
 
 Each terminal has its own fixture directory. When tests run, they automatically detect which terminal they're running in and use the appropriate fixtures.
 
-## Terminal Detection
+## Architecture
 
-The test suite detects the current terminal by checking the `TERM_PROGRAM` environment variable:
+The visual testing system is built from several focused components:
+
+```
+ComparesVisually (trait)           - Test API facade
+    ├── VisualTestConfig           - Environment detection, dimensions, modes
+    ├── TerminalEnvironment        - Terminal control, resize, output buffering
+    ├── ScreenshotSession          - Capture and compare screenshots
+    │       └── capture-window     - Swift binary using CGWindowListCreateImage
+    ├── VisualFixtureStore         - Fixture I/O, checksums, paths
+    └── InteractiveFixturePrompter - User prompts for fixture creation
+```
+
+### Terminal Detection
+
+The `VisualTestConfig` class detects the current terminal by checking the `TERM_PROGRAM` environment variable:
 
 ```php
-protected function detectTerminal(): ?string
+private static function detectTerminal(): ?string
 {
     $termProgram = getenv('TERM_PROGRAM');
 
@@ -85,10 +99,10 @@ public function colors_render_correctly()
 
 The test:
 1. Renders the content to the terminal
-2. Takes a screenshot using terminal-specific APIs
+2. Captures a screenshot using `CGWindowListCreateImage` (via our Swift helper)
 3. Renders the same content through our Screen emulator
-4. Takes another screenshot
-5. Compares the screenshots pixel-by-pixel
+4. Captures another screenshot
+5. Compares the screenshots pixel-by-pixel using ImageMagick
 
 If there's no fixture yet, it prompts the developer to visually confirm the output looks correct before saving.
 
@@ -121,6 +135,34 @@ When no fixture exists, the test:
 
 On subsequent runs, it compares the output string against the saved fixture.
 
+## Screenshot Capture
+
+Screenshot capture uses a custom Swift tool that leverages macOS's `CGWindowListCreateImage` API:
+
+```swift
+// From tests/Support/bin/capture-window.swift
+func captureWindow(windowId: CGWindowID, outputPath: String, cropTop: Int = 0) throws {
+    guard let image = CGWindowListCreateImage(
+        .null,
+        .optionIncludingWindow,
+        windowId,
+        [.boundsIgnoreFraming, .nominalResolution]
+    ) else {
+        throw CaptureError(message: "Failed to capture window")
+    }
+    // ... crop title bar and save as PNG
+}
+```
+
+This approach is more robust than the `screencapture` CLI because:
+
+- **No window activation required** — captures the window directly by ID
+- **No settle delays** — the API captures immediately
+- **No intermediate files** — crops in memory before saving
+- **Single operation** — finds terminal window and captures in one call
+
+The Swift tool is compiled on first use and cached as a binary for fast execution.
+
 ## The Test Runner
 
 The `bin/test` script handles the complexity of running visual tests:
@@ -144,7 +186,7 @@ composer test:screenshots -- --filter=positioning
 **For iTerm2**, the test runner automatically resizes the terminal to the required dimensions (180x32) via AppleScript:
 
 ```php
-function resizeIterm(int $lines, int $columns): bool
+private function resizeIterm(): bool
 {
     $script = sprintf(
         'tell application "iTerm2"
@@ -153,8 +195,8 @@ function resizeIterm(int $lines, int $columns): bool
                 set rows to %d
             end tell
         end tell',
-        $columns,
-        $lines
+        $this->config->requiredColumns,
+        $this->config->requiredLines
     );
 
     exec('osascript -e ' . escapeshellarg($script));
@@ -162,20 +204,7 @@ function resizeIterm(int $lines, int $columns): bool
 }
 ```
 
-**For Ghostty**, which doesn't support programmatic resizing, the runner prompts the developer:
-
-```
-═══════════════════════════════════════════════════════════════════════════════
-  Please resize your Ghostty terminal to:
-
-    Columns: 180
-    Rows:    32
-
-  You can check current size with: tput cols && tput lines
-═══════════════════════════════════════════════════════════════════════════════
-
-Press any key when ready...
-```
+**For Ghostty**, which doesn't support direct row/column control, the runner resizes via window bounds and prompts if dimensions don't match.
 
 ## CI Validation
 
@@ -302,7 +331,7 @@ The goal is that **identical code produces identical output** in all supported t
 
 ## Trade-offs
 
-1. **Requires macOS** — Screenshot testing uses terminal-specific macOS APIs.
+1. **Requires macOS** — Screenshot testing uses `CGWindowListCreateImage`, a macOS-specific API.
 
 2. **Manual fixture generation** — Developers must run tests in each terminal and confirm output visually.
 

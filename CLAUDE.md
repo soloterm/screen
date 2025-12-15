@@ -122,11 +122,18 @@ Screen maintains cursor position across two coordinate spaces:
 
 ### Visual Testing System
 
-The test suite includes an innovative screenshot-based comparison system (see `ComparesVisually` trait):
+The test suite includes an innovative screenshot-based comparison system built from focused components:
 
-1. **Capture real terminal output**: Renders content in iTerm, takes screenshot
-2. **Capture emulated output**: Renders same content through Screen, takes screenshot
-3. **Pixel-by-pixel comparison**: Uses ImageMagick to verify identical visual output
+- `ComparesVisually` trait — Test API facade (~200 lines)
+- `VisualTestConfig` — Environment detection, dimensions, test modes
+- `ScreenshotSession` — Capture and compare via Swift helper
+- `VisualFixtureStore` — Fixture I/O and checksums
+- `capture-window.swift` — Native screenshot capture using `CGWindowListCreateImage`
+
+**How it works:**
+1. **Capture real terminal output**: Renders content in iTerm/Ghostty, captures via `CGWindowListCreateImage`
+2. **Capture emulated output**: Renders same content through Screen, captures screenshot
+3. **Pixel comparison**: Uses ImageMagick to verify identical visual output
 
 This ensures Screen's rendering matches actual terminal behavior for complex scenarios (multi-byte chars, ANSI formatting, cursor movements, scrolling).
 

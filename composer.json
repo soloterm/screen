@@ -35,7 +35,9 @@
     "scripts": {
         "test": "php bin/test",
         "test:screenshots": "php bin/test --screenshots",
-        "test:missing": "php bin/test --missing"
+        "test:missing": "php bin/test --missing",
+        "test:failures": "php bin/test -- --order-by=defects --stop-on-failure",
+        "test:fixtures": "php bin/check-fixtures"
     },
     "config": {
         "process-timeout": 0

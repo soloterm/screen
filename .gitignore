@@ -9,6 +9,7 @@ phpstan.neon
 vendor
 node_modules
 tests/Screenshots
+tests/Support/bin/capture-window
 
 .phpunit.cache/test-results
 .claude/settings.local.json

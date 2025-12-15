@@ -1,0 +1,3 @@
+{
+    "output": "\u001b[H\u001b[2J\u001b[3;1H\u001b7\u001b8................................................................................\u001b8\u001b[1Byo 80\u001b[7;1H\u001b[0;2mAbove: 80 dots on line 1, 'yo 80' should be at start of line 2.\nIf 'yo 80' appears at column 80+, the pending wrap fix is broken.\u001b[0m"
+}

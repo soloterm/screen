@@ -352,17 +352,24 @@ composer test
 
 ### Visual testing
 
-Screen employs an innovative screenshot-based testing approach (see `ComparesVisually` trait) that validates the visual
-output against real terminal behavior. The system supports both **iTerm2** and **Ghostty** terminals to ensure
-cross-terminal compatibility.
+Screen employs an innovative screenshot-based testing approach that validates the visual output against real terminal 
+behavior. The system supports both **iTerm2** and **Ghostty** terminals to ensure cross-terminal compatibility.
+
+The visual testing system is built from focused components:
+
+- `ComparesVisually` trait — Test API facade (~200 lines)
+- `VisualTestConfig` — Environment detection and mode configuration
+- `ScreenshotSession` — Screenshot capture and comparison
+- `VisualFixtureStore` — Fixture I/O and checksums
+- `capture-window.swift` — Native macOS screenshot capture using `CGWindowListCreateImage`
 
 How it works:
 
 1. The test renders content in a real terminal (iTerm2 or Ghostty)
-2. It captures a screenshot of the terminal output
+2. It captures a screenshot using macOS's `CGWindowListCreateImage` API
 3. It runs the same content through the Screen renderer
-4. It captures a screenshot of the rendered output
-5. It compares the screenshots pixel-by-pixel to ensure accuracy
+4. It captures another screenshot
+5. It compares the screenshots pixel-by-pixel using ImageMagick
 
 This testing strategy ensures that Screen's rendering accurately matches real terminal behavior, especially for complex
 scenarios involving:
