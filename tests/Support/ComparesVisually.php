@@ -63,6 +63,7 @@ trait ComparesVisually
         // First, try fixture comparison (fast path)
         if ($this->tryFixtureMatch($content)) {
             $this->assertTrue(true);
+
             return;
         }
 
