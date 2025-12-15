@@ -167,6 +167,7 @@ trait ComparesVisually
 
         if ($fixtureExists && $fixturesInSync) {
             $this->assertEquals($fixture->output, $output, 'Output does not match saved fixture.');
+
             return;
         }
 

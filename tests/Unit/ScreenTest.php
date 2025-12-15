@@ -488,7 +488,6 @@ class ScreenTest extends TestCase
         }
     }
 
-
     #[Test]
     public function stash_restore_off_screen()
     {

@@ -38,7 +38,7 @@ class InteractiveFixturePrompter
         $this->env->restoreTerminal();
 
         echo "\n";
-        echo "Does the output look correct? [Y/n] ";
+        echo 'Does the output look correct? [Y/n] ';
 
         $handle = fopen('php://stdin', 'r');
         $input = trim(fgets($handle));

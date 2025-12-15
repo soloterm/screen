@@ -191,7 +191,7 @@ class ScreenshotSession
                 );
             }
 
-            $this->debugLog[] = "Compiling capture tool from source...";
+            $this->debugLog[] = 'Compiling capture tool from source...';
 
             $output = [];
             $exitCode = 0;
@@ -207,7 +207,7 @@ class ScreenshotSession
 
             if ($exitCode !== 0) {
                 throw new Exception(
-                    "Failed to compile capture tool: " . implode("\n", $output)
+                    'Failed to compile capture tool: ' . implode("\n", $output)
                 );
             }
         }

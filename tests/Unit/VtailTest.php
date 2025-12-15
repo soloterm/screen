@@ -11,10 +11,8 @@ namespace SoloTerm\Screen\Tests\Unit;
 
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
-use SoloTerm\Screen\AnsiMatcher;
 use SoloTerm\Screen\Screen;
 use SoloTerm\Screen\Tests\Support\ComparesVisually;
-use SoloTerm\Solo\Hotkeys\KeycodeMap;
 
 class VtailTest extends TestCase
 {
@@ -29,7 +27,6 @@ class VtailTest extends TestCase
         $this->assertTerminalMatch($line . 'yo');
     }
 
-
     #[Test]
     public function positioning_test()
     {
@@ -43,7 +40,7 @@ class VtailTest extends TestCase
         $screen = new Screen(40, 3);
         $screen->write("Line 1\n");
         $screen->write("Line 2\n");
-        $screen->write("Line 3");
+        $screen->write('Line 3');
 
         $output = $screen->output();
 
@@ -130,7 +127,7 @@ class VtailTest extends TestCase
         // Line 4: exactly 60 equals signs (tests pending wrap again)
         $screen->write(str_repeat('=', $screen->width) . "\n");
         // Line 5: final line (no newline at end)
-        $screen->write("Line 5: Final line");
+        $screen->write('Line 5: Final line');
 
         $offsetX = 8;
         $offsetY = 3;
@@ -152,7 +149,7 @@ class VtailTest extends TestCase
 
         // Position cursor for the Screen content (inside the popup)
         // Content starts at col 10 (after "│ " at cols 8-9)
-        $rendered .= "\e[" . ($offsetY + 1) . ";" . ($offsetX + 2) . "H";
+        $rendered .= "\e[" . ($offsetY + 1) . ';' . ($offsetX + 2) . 'H';
 
         // Output the Screen - it will save this position and render relative to it
         $rendered .= $screen->output();
@@ -189,7 +186,7 @@ class VtailTest extends TestCase
         // The "yo 80" text should appear on line 2, column 1 - NOT offset to the right.
 
         $screen = new Screen(80, 3);
-        $screen->write(str_repeat('.', $screen->width) . "yo " . $screen->width);
+        $screen->write(str_repeat('.', $screen->width) . 'yo ' . $screen->width);
 
         $rendered = "\e[H\e[2J"; // Clear screen
         $rendered .= "\e[3;1H";  // Position at row 3, col 1

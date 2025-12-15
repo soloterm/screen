@@ -157,7 +157,7 @@ class Screen
             // Move down to this line's row (relative) from the origin.
             // visibleRow is 1-based, so visibleRow=1 is the origin row (no movement needed).
             if ($visibleRow > 1) {
-                $parts[] = "\033[" . ($visibleRow - 1) . "B"; // CUD (cursor down)
+                $parts[] = "\033[" . ($visibleRow - 1) . 'B'; // CUD (cursor down)
             }
 
             // Render the line content. No newline afterwards.

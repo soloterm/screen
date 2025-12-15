@@ -14,7 +14,9 @@ namespace SoloTerm\Screen\Tests\Support;
 class VisualTestConfig
 {
     public const MODE_DISABLED = 0;
+
     public const MODE_ENABLED = 1;
+
     public const MODE_RECORD_MISSING = 2;
 
     private static ?self $instance = null;
