@@ -113,6 +113,11 @@ class VisualTestConfig
         return false;
     }
 
+    public function canRunVisualTest(): bool
+    {
+        return $this->mode !== self::MODE_DISABLED && $this->hasValidTerminal();
+    }
+
     public function titleBarHeight(): int
     {
         return match ($this->terminal) {

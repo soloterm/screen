@@ -59,17 +59,42 @@ trait ComparesVisually
         }
 
         $this->uniqueTestIdentifier = $this->uniqueTestIdentifier();
-        [$path, $function] = $this->uniqueTestIdentifier;
 
-        $fixturePath = $this->terminalFixturePath();
-        $fixtureExists = $this->fixtureStore()->loadTerminalFixture($fixturePath, $content) !== null;
-        $fixturesInSync = $this->fixtureStore()->fixturesAreInSync($path, $function);
+        // First, try fixture comparison (fast path)
+        if ($this->tryFixtureMatch($content)) {
+            $this->assertTrue(true);
+            return;
+        }
 
-        if ($this->visualConfig()->shouldRunVisualTest($fixtureExists, $fixturesInSync)) {
+        // Fixture didn't match or doesn't exist - fall back to visual comparison if enabled
+        if ($this->visualConfig()->canRunVisualTest()) {
             $this->terminalEnv()->withOutput(fn() => $this->assertVisualMatch($content));
         } else {
+            // No visual testing available - run fixture match which will skip or fail appropriately
             $this->assertFixtureMatch($content);
         }
+    }
+
+    /**
+     * Try to match against a fixture. Returns true if fixture exists and matches.
+     * Returns false if fixture doesn't exist or doesn't match (caller should fall back to visual).
+     */
+    protected function tryFixtureMatch(array $content): bool
+    {
+        $fixturePath = $this->terminalFixturePath();
+        $fixture = $this->fixtureStore()->loadTerminalFixture($fixturePath, $content);
+
+        if (!$fixture) {
+            return false;
+        }
+
+        $screen = new Screen($fixture->width, $fixture->height);
+
+        foreach ($content as $c) {
+            $screen->write($c);
+        }
+
+        return $fixture->output === $screen->output();
     }
 
     protected function assertFixtureMatch(array $content): void

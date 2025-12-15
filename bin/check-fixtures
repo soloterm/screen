@@ -15,6 +15,32 @@
 $fixturesDir = __DIR__ . '/../tests/Fixtures';
 $errors = [];
 $checked = 0;
+$dimensionErrors = [];
+$dimensionsChecked = 0;
+
+// Required fixture dimensions (must match CI environment)
+const REQUIRED_WIDTH = 180;
+const REQUIRED_HEIGHT = 32;
+
+echo "Checking fixture dimensions (" . REQUIRED_WIDTH . "x" . REQUIRED_HEIGHT . ")...\n\n";
+
+// Check dimensions for all terminal fixtures
+$dimensionsChecked += checkFixtureDimensions($fixturesDir . '/iterm', $dimensionErrors);
+$dimensionsChecked += checkFixtureDimensions($fixturesDir . '/ghostty', $dimensionErrors);
+
+if (count($dimensionErrors) > 0) {
+    echo "DIMENSION ERRORS FOUND:\n\n";
+    foreach ($dimensionErrors as $error) {
+        echo "  ✗ {$error}\n";
+    }
+    echo "\n";
+    echo "Found " . count($dimensionErrors) . " fixture dimension error(s).\n";
+    echo "All fixtures must be generated at " . REQUIRED_WIDTH . "x" . REQUIRED_HEIGHT . ".\n";
+    echo "Resize your terminal and run: composer test:screenshots\n";
+    exit(1);
+}
+
+echo "✓ All {$dimensionsChecked} fixture(s) have correct dimensions.\n\n";
 
 echo "Checking terminal fixture synchronization...\n\n";
 
@@ -133,4 +159,36 @@ function findJsonFiles(string $dir): array
 function filesMatch(string $file1, string $file2): bool
 {
     return file_get_contents($file1) === file_get_contents($file2);
+}
+
+/**
+ * Check that all fixtures in a directory have the required dimensions.
+ *
+ * @return int Number of fixtures checked
+ */
+function checkFixtureDimensions(string $dir, array &$errors): int
+{
+    $checked = 0;
+
+    if (!is_dir($dir)) {
+        return $checked;
+    }
+
+    $files = findJsonFiles($dir);
+    foreach ($files as $file) {
+        $data = json_decode(file_get_contents($file), true);
+
+        if (!isset($data['width']) || !isset($data['height'])) {
+            continue;
+        }
+
+        $checked++;
+
+        if ($data['width'] !== REQUIRED_WIDTH || $data['height'] !== REQUIRED_HEIGHT) {
+            $relPath = basename(dirname($dir)) . '/' . basename($dir) . '/' . substr($file, strlen($dir) + 1);
+            $errors[] = "{$relPath}: {$data['width']}x{$data['height']} (expected " . REQUIRED_WIDTH . "x" . REQUIRED_HEIGHT . ")";
+        }
+    }
+
+    return $checked;
 }
