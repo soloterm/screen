@@ -56,6 +56,12 @@ class VisualFixtureStore
             return "{$this->config->fixturesRoot}/Renders/{$terminal}/{$relativePath}/{$function}.json";
         }
 
+        // In CI (no terminal), prefer iTerm fixtures since we assert iTerm and Ghostty are identical
+        $itermPath = "{$this->config->fixturesRoot}/Renders/iterm/{$relativePath}/{$function}.json";
+        if (file_exists($itermPath)) {
+            return $itermPath;
+        }
+
         return "{$this->config->fixturesRoot}/Renders/{$relativePath}/{$function}.json";
     }
 
