@@ -472,15 +472,14 @@ tests/Fixtures/
 │   └── Unit/
 │       └── TestClass/
 │           └── test_name.json
-├── ghostty/         # Ghostty-specific fixtures
-│   └── Unit/
-│       └── ...
-└── Unit/            # Legacy/fallback fixtures
-    └── ...
+└── ghostty/         # Ghostty-specific fixtures
+    └── Unit/
+        └── ...
 ```
 
 When running tests without screenshot generation, the system uses stored fixtures for comparison, making tests fast and
-suitable for CI/CD pipelines.
+suitable for CI/CD pipelines. In CI (where no terminal is available), iTerm fixtures are used since we validate that
+iTerm and Ghostty fixtures are identical.
 
 ## Contributing
 
