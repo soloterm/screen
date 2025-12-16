@@ -498,6 +498,18 @@ This is free! If you want to support me:
     - [Screencasting](https://screencasting.com)
 - Help spread the word about things I make
 
+## Related Projects
+
+Screen is part of the SoloTerm ecosystem of Laravel and PHP development tools:
+
+- [Solo](https://github.com/soloterm/solo) - All-in-one Laravel command for local development
+- [Dumps](https://github.com/soloterm/dumps) - Laravel command to intercept dumps
+- [Grapheme](https://github.com/soloterm/grapheme) - Unicode grapheme width calculator
+- [Notify](https://github.com/soloterm/notify) - PHP package for desktop notifications via OSC escape sequences
+- [Notify Laravel](https://github.com/soloterm/notify-laravel) - Laravel integration for soloterm/notify
+- [TNotify](https://github.com/soloterm/tnotify) - Standalone, cross-platform CLI for desktop notifications
+- [VTail](https://github.com/soloterm/vtail) - Vendor-aware tail for Laravel logs
+
 ## Credits
 
 Solo Screen was developed by Aaron Francis. If you like it, please let me know!
