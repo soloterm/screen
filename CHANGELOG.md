@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Cross-terminal testing** - Visual testing now supports multiple terminals (iTerm and Ghostty) with terminal-specific fixture directories
+- **Fixture checking script** - New `bin/check-fixtures` script to verify all visual test fixtures are present
+
+### Changed
+
+- **Rendering uses relative cursor positioning** - `Screen::output()` now uses DECSC/DECRC (save/restore cursor) with CUD (cursor down) instead of newlines between lines, avoiding "pending wrap" terminal inconsistencies and enabling correct rendering at any offset in a parent TUI
+
+### Fixed
+
+- **Pending wrap terminal inconsistencies** - Different terminals handle full-width lines differently when using `\n`; new relative positioning approach eliminates this issue
+
 ## [1.1.1] - 2025-12-14
 
 ### Added

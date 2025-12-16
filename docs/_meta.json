@@ -1,0 +1,14 @@
+{
+    "title": "Screen",
+    "description": "Pure PHP terminal renderer with ANSI escape sequence support",
+    "pages": [
+        { "slug": "index", "title": "Introduction" },
+        { "slug": "installation", "title": "Installation" },
+        { "slug": "basic-usage", "title": "Basic Usage" },
+        { "slug": "architecture", "title": "Architecture" },
+        { "slug": "ansi-reference", "title": "ANSI Reference" },
+        { "slug": "advanced", "title": "Advanced Usage" },
+        { "slug": "api-reference", "title": "API Reference" },
+        { "slug": "bitmasks", "title": "Bitmasks Deep Dive" }
+    ]
+}
