@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace SoloTerm\Screen\Tests\Support;
 
-final readonly class VisualTestRunnerOptions
+final class VisualTestRunnerOptions
 {
     /**
      * @param  list<string>  $phpunitArgs

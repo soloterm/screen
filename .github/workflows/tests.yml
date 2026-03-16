@@ -38,8 +38,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          composer self-update
-          composer update --prefer-dist --no-interaction
+          composer update --prefer-dist --no-interaction --with soloterm/grapheme:v1.1.0
 
       - name: Execute tests
         env:
