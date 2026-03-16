@@ -400,6 +400,19 @@ class ScreenTest extends TestCase
     }
 
     #[Test]
+    public function cursor_horizontal_absolute_clamps_to_last_visible_column(): void
+    {
+        $screen = new Screen(5, 2);
+
+        $screen->write("\e[1000Ga");
+
+        $this->assertSame(0, $screen->cursorRow);
+        $this->assertSame(5, $screen->cursorCol);
+        $this->assertSame('a', $screen->printable->buffer[0][4]);
+        $this->assertArrayNotHasKey(1, $screen->printable->buffer);
+    }
+
+    #[Test]
     public function doesnt_go_past_height_relative()
     {
         $this->assertTerminalMatch([
@@ -500,8 +513,21 @@ class ScreenTest extends TestCase
     #[Test]
     public function alt_screen()
     {
-        $this->markTestSkipped('Not implemented yet');
-        $this->assertTerminalMatch("abcd\e[?1049hefgh");
+        $screen = new Screen(20, 5);
+
+        $screen->write("abcd\e[?1049hefgh");
+
+        $this->assertSame(['efgh'], $screen->printable->lines());
+    }
+
+    #[Test]
+    public function alt_screen_restore_returns_to_main_buffer(): void
+    {
+        $screen = new Screen(20, 5);
+
+        $screen->write("main\e[?1049halt\e[?1049l");
+
+        $this->assertSame(['main'], $screen->printable->lines());
     }
 
     #[Test]
@@ -677,6 +703,28 @@ TXT;
     }
 
     #[Test]
+    public function cursor_home_single_param_defaults_column_without_warning(): void
+    {
+        $screen = new Screen(10, 3);
+
+        set_error_handler(static function (int $severity, string $message, string $file, int $line): never {
+            throw new \ErrorException($message, 0, $severity, $file, $line);
+        });
+
+        try {
+            $screen->write("abc\nxyz\e[2H@");
+        } finally {
+            restore_error_handler();
+        }
+
+        $this->assertSame(1, $screen->cursorRow);
+        $this->assertSame(1, $screen->cursorCol);
+        $this->assertSame('@', $screen->printable->buffer[1][0]);
+        $this->assertSame('y', $screen->printable->buffer[1][1]);
+        $this->assertSame('z', $screen->printable->buffer[1][2]);
+    }
+
+    #[Test]
     public function newline_regression_1()
     {
         $height = $this->makeIdenticalScreen()->height;
@@ -786,12 +834,12 @@ TXT;
     #[Test]
     public function test_alternate_character_set(): void
     {
-        $this->markTestSkipped('Not yet implemented');
+        $screen = new Screen(20, 5);
 
-        $this->assertTerminalMatch([
-            "\e(0lqqk\e(B",  // Switch to line drawing and back
-            'Normal text'
-        ]);
+        $screen->write("\e(0lqqk\e(B\nNormal text");
+
+        $this->assertSame('┌──┐', $screen->printable->lines()[0]);
+        $this->assertSame('Normal text', $screen->printable->lines()[1]);
     }
 
     #[Test]
@@ -834,9 +882,28 @@ TXT;
     {
         $this->assertTerminalMatch([
             "Line 1\nLine 2\nLine 3",
+            "\r", // Off-column IL differs across terminals; assert the first-column subset.
             "\e[2L",  // Insert 2 lines at current position
             'New Content'
         ], iterate: true);
+    }
+
+    #[Test]
+    public function insert_lines_from_the_first_column_are_portable(): void
+    {
+        $screen = new Screen(180, 32);
+
+        $screen->write("Line 1\nLine 2\nLine 3");
+        $screen->write("\r");
+        $screen->write("\e[L");
+        $screen->write('New Content');
+
+        $this->assertSame(2, $screen->cursorRow);
+        $this->assertSame(11, $screen->cursorCol);
+        $this->assertSame('Line 1', $screen->printable->lines()[0]);
+        $this->assertSame('Line 2', $screen->printable->lines()[1]);
+        $this->assertSame('New Content', $screen->printable->lines()[2]);
+        $this->assertSame('Line 3', $screen->printable->lines()[3]);
     }
 
     #[Test]
@@ -844,6 +911,7 @@ TXT;
     {
         $this->assertTerminalMatch([
             implode(PHP_EOL, range(0, 100)),
+            "\r", // Off-column IL differs across terminals; assert the first-column subset.
             "\e[2L",  // Insert 2 lines at current position
             'New Content'
         ], iterate: true);
@@ -856,6 +924,7 @@ TXT;
 
         $this->assertTerminalMatch([
             implode(PHP_EOL, range(0, $height - 5)),
+            "\r", // Off-column IL differs across terminals; assert the first-column subset.
             "\e[20L",
             'New Content'
         ], iterate: true);
@@ -866,6 +935,7 @@ TXT;
     {
         $this->assertTerminalMatch([
             "Line 1\nLine 2\nLine 3",
+            "\r", // Off-column IL differs across terminals; assert the first-column subset.
             "\e[L",
             'New Content'
         ], iterate: true);
@@ -933,5 +1003,24 @@ TXT;
             'Line 3[3;1H',
             'd',
         ]);
+    }
+
+    #[Test]
+    public function query_responses_use_valid_escape_terminators(): void
+    {
+        $screen = new Screen(80, 24);
+        $responses = [];
+
+        $screen->respondToQueriesVia(function (string $response) use (&$responses): void {
+            $responses[] = $response;
+        });
+
+        $screen->write("\e]10;?\x07\e]11;?\x07\e[6n");
+
+        $this->assertSame([
+            "\e]10;rgb:0000/0000/0000\e\\",
+            "\e]11;rgb:FFFF/FFFF/FFFF\e\\",
+            "\e[1;1R",
+        ], $responses);
     }
 }

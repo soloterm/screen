@@ -772,4 +772,19 @@ class CellBufferTest extends TestCase
         // Should contain the character
         $this->assertStringContainsString('X', $output);
     }
+
+    #[Test]
+    public function render_diff_optimized_tracks_wide_character_widths(): void
+    {
+        $buffer = new CellBuffer(10, 5);
+        $buffer->swapBuffers();
+
+        $buffer->writeChar(0, 0, '文');
+        $buffer->writeContinuation(0, 1);
+        $buffer->writeChar(0, 2, 'A');
+
+        $output = $buffer->renderDiffOptimized();
+
+        $this->assertSame('文A', $output);
+    }
 }

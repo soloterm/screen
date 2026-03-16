@@ -55,38 +55,60 @@ func captureWindow(windowId: CGWindowID, outputPath: String, cropTop: Int = 0) t
     }
 }
 
-func findTerminalWindow(terminalName: String) -> CGWindowID? {
+func acceptableOwners(for terminalName: String) -> Set<String> {
+    switch terminalName.lowercased() {
+    case "iterm", "iterm2":
+        return ["iterm2", "iterm"]
+    case "ghostty":
+        return ["ghostty"]
+    default:
+        return [terminalName.lowercased()]
+    }
+}
+
+func findTerminalWindow(terminalName: String, titleContains: String? = nil) -> CGWindowID? {
     let options = CGWindowListOption(arrayLiteral: .optionOnScreenOnly)
     guard let windowList = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as NSArray? as? [[String: Any]] else {
         return nil
     }
-    
-    let normalizedName = terminalName.lowercased()
-    let targetOwner: String
-    
-    switch normalizedName {
-    case "iterm", "iterm2":
-        targetOwner = "iterm2"
-    case "ghostty":
-        targetOwner = "ghostty"
-    default:
-        targetOwner = normalizedName
-    }
-    
+
+    let allowedOwners = acceptableOwners(for: terminalName)
+    let frontmostApp = NSWorkspace.shared.frontmostApplication?.localizedName?.lowercased()
+    let requireTitle = titleContains?.isEmpty == false
+    var fallbackCandidates: [(windowId: CGWindowID, area: Double)] = []
+
     for window in windowList {
         guard let owner = window[kCGWindowOwnerName as String] as? String,
               let layer = window[kCGWindowLayer as String] as? Int,
               let windowId = window[kCGWindowNumber as String] as? Int,
-              layer == 0 else {
+              let alpha = window[kCGWindowAlpha as String] as? Double,
+              let bounds = window[kCGWindowBounds as String] as? [String: Any],
+              let width = bounds["Width"] as? Double,
+              let height = bounds["Height"] as? Double,
+              layer == 0,
+              alpha > 0,
+              width > 0,
+              height > 0,
+              allowedOwners.contains(owner.lowercased()) else {
             continue
         }
-        
-        if owner.lowercased() == targetOwner {
+
+        let title = (window[kCGWindowName as String] as? String) ?? ""
+
+        if let titleContains, !titleContains.isEmpty, title.localizedCaseInsensitiveContains(titleContains) {
             return CGWindowID(windowId)
         }
+
+        if !requireTitle {
+            if let frontmostApp, allowedOwners.contains(frontmostApp) {
+                return CGWindowID(windowId)
+            }
+
+            fallbackCandidates.append((windowId: CGWindowID(windowId), area: width * height))
+        }
     }
-    
-    return nil
+
+    return fallbackCandidates.max(by: { $0.area < $1.area })?.windowId
 }
 
 func printUsage() {
@@ -97,10 +119,10 @@ func printUsage() {
       capture --window-id <id> --output <path> [--crop-top <pixels>]
           Capture a specific window by ID
       
-      find-window --terminal <name>
+      find-window --terminal <name> [--window-title-contains <text>]
           Find the frontmost window ID for a terminal (iterm, ghostty)
       
-      capture-terminal --terminal <name> --output <path> [--crop-top <pixels>]
+      capture-terminal --terminal <name> --output <path> [--crop-top <pixels>] [--window-title-contains <text>]
           Find and capture the frontmost terminal window
     
     Options:
@@ -108,6 +130,8 @@ func printUsage() {
       --output <path>      Output file path (PNG)
       --crop-top <pixels>  Pixels to crop from top (for title bar removal)
       --terminal <name>    Terminal name: iterm, ghostty
+      --window-title-contains <text>
+                           Prefer a window whose title contains the given text
     """
     print(usage)
 }
@@ -167,6 +191,7 @@ func main() throws {
         
     case "find-window":
         var terminalName: String?
+        var titleContains: String?
         
         var i = 2
         while i < args.count {
@@ -177,6 +202,12 @@ func main() throws {
                     throw CaptureError(message: "Missing terminal name")
                 }
                 terminalName = args[i]
+            case "--window-title-contains":
+                i += 1
+                guard i < args.count else {
+                    throw CaptureError(message: "Missing window title text")
+                }
+                titleContains = args[i]
             default:
                 throw CaptureError(message: "Unknown option: \(args[i])")
             }
@@ -187,7 +218,7 @@ func main() throws {
             throw CaptureError(message: "Terminal name is required")
         }
         
-        guard let windowId = findTerminalWindow(terminalName: name) else {
+        guard let windowId = findTerminalWindow(terminalName: name, titleContains: titleContains) else {
             throw CaptureError(message: "Could not find window for terminal: \(name)")
         }
         
@@ -197,6 +228,7 @@ func main() throws {
         var terminalName: String?
         var outputPath: String?
         var cropTop = 0
+        var titleContains: String?
         
         var i = 2
         while i < args.count {
@@ -219,6 +251,12 @@ func main() throws {
                     throw CaptureError(message: "Invalid crop-top value")
                 }
                 cropTop = pixels
+            case "--window-title-contains":
+                i += 1
+                guard i < args.count else {
+                    throw CaptureError(message: "Missing window title text")
+                }
+                titleContains = args[i]
             default:
                 throw CaptureError(message: "Unknown option: \(args[i])")
             }
@@ -232,7 +270,7 @@ func main() throws {
             throw CaptureError(message: "Output path is required")
         }
         
-        guard let windowId = findTerminalWindow(terminalName: name) else {
+        guard let windowId = findTerminalWindow(terminalName: name, titleContains: titleContains) else {
             throw CaptureError(message: "Could not find window for terminal: \(name)")
         }
         

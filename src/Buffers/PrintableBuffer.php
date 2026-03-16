@@ -18,6 +18,56 @@ class PrintableBuffer extends Buffer
         return $this;
     }
 
+    public function resizeWidth(int $width): static
+    {
+        $oldWidth = $this->width;
+
+        if ($width < $oldWidth) {
+            foreach ($this->buffer as $row => $line) {
+                $normalized = array_replace(array_fill(0, $oldWidth, ' '), $line);
+                $visible = array_slice($normalized, 0, $width);
+
+                for ($col = 0; $col < $width; $col++) {
+                    if (array_key_exists($col, $normalized) && $normalized[$col] === null) {
+                        continue;
+                    }
+
+                    $endCol = $col;
+                    while (
+                        ($endCol + 1) < $oldWidth
+                        && array_key_exists($endCol + 1, $normalized)
+                        && $normalized[$endCol + 1] === null
+                    ) {
+                        $endCol++;
+                    }
+
+                    if ($endCol >= $width) {
+                        for ($fill = $col; $fill < $width; $fill++) {
+                            $visible[$fill] = ' ';
+                        }
+                    }
+
+                    $col = $endCol;
+                }
+
+                while ($visible !== [] && end($visible) === ' ') {
+                    array_pop($visible);
+                }
+
+                if ($visible !== $line) {
+                    $this->buffer[$row] = $visible;
+                    $this->markLineDirty($row);
+                }
+            }
+        } else {
+            parent::resizeWidth($width);
+        }
+
+        $this->width = $width;
+
+        return $this;
+    }
+
     /**
      * Writes a string into the buffer at the specified row and starting column.
      * The string is split into "units" (either single characters or grapheme clusters),
@@ -36,17 +86,7 @@ class PrintableBuffer extends Buffer
      */
     public function writeString(int $row, int $col, string $text): array
     {
-        // Determine the units to iterate over: if the text is ASCII-only, we can split by character,
-        // otherwise we split into grapheme clusters.
-        if (strlen($text) === mb_strlen($text)) {
-            $units = str_split($text);
-        } else {
-            if (preg_match_all('/\X/u', $text, $matches) === false) {
-                throw new Exception('Error splitting text into grapheme clusters.');
-            }
-
-            $units = $matches[0];
-        }
+        $units = $this->splitPrintableUnits($text);
 
         $currentCol = $col;
         $advanceCursor = 0;
@@ -127,6 +167,31 @@ class PrintableBuffer extends Buffer
         $this->markLineDirty($row);
 
         return [$advanceCursor, $remainder];
+    }
+
+    /**
+     * Split a printable string into terminal write units.
+     *
+     * Screen intentionally keeps this separate from Grapheme::split():
+     * the renderer follows terminal-parity behavior for overwrite/movement,
+     * while Grapheme::split() follows the best available Unicode default
+     * segmentation rules.
+     *
+     * @return list<string>
+     *
+     * @throws Exception if splitting into grapheme clusters fails.
+     */
+    protected function splitPrintableUnits(string $text): array
+    {
+        if (strlen($text) === mb_strlen($text)) {
+            return str_split($text);
+        }
+
+        if (preg_match_all('/\X/u', $text, $matches) === false) {
+            throw new Exception('Error splitting text into grapheme clusters.');
+        }
+
+        return $matches[0];
     }
 
     public function lines(): array

@@ -169,6 +169,28 @@ class Buffer implements ArrayAccess
         $this->trim();
     }
 
+    public function resizeWidth(int $width): static
+    {
+        foreach ($this->buffer as $row => $line) {
+            $trimmed = [];
+
+            foreach ($line as $col => $value) {
+                if ($col >= $width) {
+                    break;
+                }
+
+                $trimmed[$col] = $value;
+            }
+
+            if ($trimmed !== $line) {
+                $this->buffer[$row] = $trimmed;
+                $this->markLineDirty($row);
+            }
+        }
+
+        return $this;
+    }
+
     public function rowMax($row)
     {
         return count($this->buffer[$row]) - 1;

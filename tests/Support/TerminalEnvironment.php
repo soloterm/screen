@@ -26,6 +26,10 @@ class TerminalEnvironment
 
     public function makeIdenticalScreen(): Screen
     {
+        if (!$this->config->canRunVisualTest()) {
+            return new Screen($this->config->requiredColumns, $this->config->requiredLines);
+        }
+
         $terminal = new Terminal;
 
         (new ReflectionClass($terminal))->getMethod('initDimensions')->invoke($terminal);
@@ -202,21 +206,39 @@ class TerminalEnvironment
             return $callback();
         }
 
-        $captured = ob_get_clean();
+        $captured = [];
+
+        while (ob_get_level() > 0) {
+            $captured[] = ob_get_clean();
+        }
 
         try {
             return $callback();
         } finally {
-            ob_start();
-            echo $captured;
+            for ($i = count($captured) - 1; $i >= 0; $i--) {
+                ob_start();
+                echo $captured[$i];
+            }
         }
     }
 
     public function waitForKeypress(): void
     {
+        $original = trim((string) shell_exec('stty -g 2>/dev/null'));
+
+        if ($original === '') {
+            fgetc(STDIN);
+
+            return;
+        }
+
         system('stty cbreak -echo');
-        fgetc(STDIN);
-        system('stty sane');
+
+        try {
+            fgetc(STDIN);
+        } finally {
+            system('stty ' . escapeshellarg($original));
+        }
     }
 
     public static function resetStaticState(): void

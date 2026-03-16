@@ -62,6 +62,16 @@ class VisualTestConfig
 
     private static function detectTerminal(): ?string
     {
+        $forced = getenv('SOLOTERM_SCREEN_FORCED_TERMINAL');
+
+        if ($forced !== false && $forced !== '') {
+            return match (strtolower($forced)) {
+                'iterm', 'iterm2' => 'iterm',
+                'ghostty' => 'ghostty',
+                default => null,
+            };
+        }
+
         $termProgram = getenv('TERM_PROGRAM');
 
         if ($termProgram === 'iTerm.app') {

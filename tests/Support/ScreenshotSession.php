@@ -112,13 +112,17 @@ class ScreenshotSession
     {
         $terminal = $this->config->terminal;
         $cropTop = $this->config->titleBarHeight();
+        $captureTitle = getenv('SOLOTERM_SCREEN_CAPTURE_TITLE') ?: null;
 
         $command = sprintf(
-            '%s capture-terminal --terminal %s --output %s --crop-top %d 2>&1',
+            '%s capture-terminal --terminal %s --output %s --crop-top %d%s 2>&1',
             escapeshellarg($this->captureToolPath),
             escapeshellarg($terminal),
             escapeshellarg($filename),
-            $cropTop
+            $cropTop,
+            $captureTitle !== null
+                ? ' --window-title-contains ' . escapeshellarg($captureTitle)
+                : '',
         );
 
         $output = [];
@@ -179,41 +183,43 @@ class ScreenshotSession
     private function ensureCaptureToolExists(): void
     {
         $this->captureToolPath = __DIR__ . '/bin/capture-window';
+        $sourcePath = $this->captureToolPath . '.swift';
 
-        if (!file_exists($this->captureToolPath)) {
-            // Try to compile from source
-            $sourcePath = $this->captureToolPath . '.swift';
-
-            if (!file_exists($sourcePath)) {
-                throw new Exception(
-                    "Screenshot capture tool not found at {$this->captureToolPath} " .
-                    "and source not found at {$sourcePath}"
-                );
-            }
-
-            $this->debugLog[] = 'Compiling capture tool from source...';
-
-            $output = [];
-            $exitCode = 0;
-            exec(
-                sprintf(
-                    'swiftc -O -o %s %s 2>&1',
-                    escapeshellarg($this->captureToolPath),
-                    escapeshellarg($sourcePath)
-                ),
-                $output,
-                $exitCode
+        if (!file_exists($sourcePath)) {
+            throw new Exception(
+                "Screenshot capture tool source not found at {$sourcePath}"
             );
+        }
 
-            if ($exitCode !== 0) {
-                throw new Exception(
-                    'Failed to compile capture tool: ' . implode("\n", $output)
-                );
-            }
+        if (!file_exists($this->captureToolPath) || filemtime($sourcePath) > filemtime($this->captureToolPath)) {
+            $this->compileCaptureTool($sourcePath);
         }
 
         if (!is_executable($this->captureToolPath)) {
             throw new Exception("Capture tool at {$this->captureToolPath} is not executable");
+        }
+    }
+
+    private function compileCaptureTool(string $sourcePath): void
+    {
+        $this->debugLog[] = 'Compiling capture tool from source...';
+
+        $output = [];
+        $exitCode = 0;
+        exec(
+            sprintf(
+                'swiftc -O -o %s %s 2>&1',
+                escapeshellarg($this->captureToolPath),
+                escapeshellarg($sourcePath)
+            ),
+            $output,
+            $exitCode
+        );
+
+        if ($exitCode !== 0) {
+            throw new Exception(
+                'Failed to compile capture tool: ' . implode("\n", $output)
+            );
         }
     }
 }

@@ -1,6 +1,11 @@
 #!/usr/bin/env php
 <?php
 
+require __DIR__ . '/../vendor/autoload.php';
+
+use SoloTerm\Screen\Tests\Support\LastFailedTestStore;
+use SoloTerm\Screen\Tests\Support\VisualTestRunner;
+
 /**
  * Test runner with screenshot testing support for multiple terminals.
  *
@@ -8,34 +13,37 @@
  *   composer test                    Run tests without screenshot generation
  *   composer test:screenshots        Generate all screenshots/fixtures (requires iTerm or Ghostty)
  *   composer test:missing            Generate missing fixtures or regenerate out-of-sync fixtures
+ *   composer test:failed             Re-run only the tests that failed in the last wrapped PHPUnit run
  *   composer test:fixtures           Validate fixtures are in sync between terminals
+ *   composer test:screenshots -- --terminal=iterm
+ *                                   Launch a fresh iTerm window and run screenshot tests there
  *
  * Screenshot tests must be run in the correct terminal (iTerm or Ghostty).
  * Fixtures are stored per-terminal in tests/Fixtures/{iterm|ghostty}/...
  */
 
-$args = array_slice($argv, 1);
-$phpunitArgs = [];
+$options = VisualTestRunner::parseArguments($argv);
+$phpunitArgs = $options->phpunitArgs;
+$screenshots = $options->screenshots;
+$missingOnly = $options->missingOnly;
+$failedOnly = $options->failedOnly;
+$requestedTerminal = $options->requestedTerminal;
+$lastFailedStore = new LastFailedTestStore(__DIR__ . '/../.phpunit.cache/soloterm-last-failed-tests.json');
 
-$screenshots = false;
-$missingOnly = false;
-$passthrough = false;
-
-foreach ($args as $arg) {
-    if ($arg === '--') {
-        $passthrough = true;
-        continue;
+if ($failedOnly) {
+    if (VisualTestRunner::phpunitArgsContainFilter($phpunitArgs)) {
+        fwrite(STDERR, "The --failed mode cannot be combined with a custom PHPUnit --filter.\n");
+        exit(1);
     }
 
-    if ($passthrough) {
-        $phpunitArgs[] = $arg;
-    } elseif ($arg === '--screenshots' || $arg === '-s') {
-        $screenshots = true;
-    } elseif ($arg === '--missing' || $arg === '-m') {
-        $missingOnly = true;
-    } else {
-        $phpunitArgs[] = $arg;
+    $failedFilter = $lastFailedStore->buildPhpunitFilter();
+
+    if ($failedFilter === null) {
+        echo "No recorded failed tests to rerun.\n";
+        exit(0);
     }
+
+    $phpunitArgs = VisualTestRunner::appendPhpunitOption($phpunitArgs, '--filter', $failedFilter);
 }
 
 // Set up environment for screenshot testing
@@ -53,11 +61,22 @@ if ($screenshots || $missingOnly) {
     // Detect terminal - no override allowed
     $terminal = detectTerminal();
 
+    if (VisualTestRunner::shouldLaunchInFreshTerminal($requestedTerminal, $options->screenshotModeRequested())) {
+        echo "Launching screenshot tests in a fresh {$requestedTerminal} window...\n";
+        exit(launchTerminalRelay($argv, $requestedTerminal, $requiredLines, $requiredColumns));
+    }
+
+    if ($requestedTerminal !== null && $terminal !== $requestedTerminal) {
+        fwrite(STDERR, "Requested terminal '{$requestedTerminal}', but current terminal is " . ($terminal ?: 'unknown') . ".\n");
+        exit(1);
+    }
+
     if (!$terminal) {
         fwrite(STDERR, "Screenshot testing requires iTerm or Ghostty.\n");
         fwrite(STDERR, "Current terminal: " . (getenv('TERM_PROGRAM') ?: 'unknown') . "\n");
         fwrite(STDERR, "\n");
         fwrite(STDERR, "Please run this command directly in iTerm or Ghostty.\n");
+        fwrite(STDERR, "Or launch a fresh terminal automatically with: composer test:screenshots -- --terminal=iterm\n");
         exit(1);
     }
 
@@ -115,6 +134,17 @@ if ($screenshots || $missingOnly) {
 }
 
 // Build the command
+$junitLogPath = tempnam(sys_get_temp_dir(), 'soloterm-screen-junit-');
+
+if ($junitLogPath === false) {
+    fwrite(STDERR, "Could not allocate a temporary JUnit log path.\n");
+    exit(1);
+}
+
+@unlink($junitLogPath);
+
+$phpunitArgs = VisualTestRunner::appendPhpunitOption($phpunitArgs, '--log-junit', $junitLogPath);
+
 $command = 'vendor/bin/phpunit';
 if (!empty($phpunitArgs)) {
     $command .= ' ' . implode(' ', array_map('escapeshellarg', $phpunitArgs));
@@ -127,6 +157,8 @@ if ($screenshots || $missingOnly) {
 
 // Execute phpunit
 passthru($command, $exitCode);
+$lastFailedStore->recordFromJunit($junitLogPath);
+@unlink($junitLogPath);
 exit($exitCode);
 
 /**
@@ -134,6 +166,12 @@ exit($exitCode);
  */
 function detectTerminal(): ?string
 {
+    $forced = VisualTestRunner::normalizeTerminal(getenv('SOLOTERM_SCREEN_FORCED_TERMINAL') ?: null);
+
+    if ($forced !== null) {
+        return $forced;
+    }
+
     $termProgram = getenv('TERM_PROGRAM');
 
     if ($termProgram === 'iTerm.app') {
@@ -166,4 +204,149 @@ function resizeIterm(int $lines, int $columns): bool
     exec('osascript -e ' . escapeshellarg($script) . ' 2>&1', $output, $exitCode);
 
     return $exitCode === 0;
+}
+
+/**
+ * Launch the same test command inside a fresh terminal window and wait for completion.
+ */
+function launchTerminalRelay(array $argv, string $terminal, int $requiredLines, int $requiredColumns): int
+{
+    $resultPath = tempnam(sys_get_temp_dir(), 'soloterm-screen-iterm-');
+    $relayScriptPath = tempnam(sys_get_temp_dir(), 'soloterm-screen-relay-');
+    $relayLogPath = tempnam(sys_get_temp_dir(), 'soloterm-screen-log-');
+
+    if ($resultPath === false || $relayScriptPath === false || $relayLogPath === false) {
+        if ($resultPath !== false) {
+            @unlink($resultPath);
+        }
+        if ($relayScriptPath !== false) {
+            @unlink($relayScriptPath);
+        }
+        if ($relayLogPath !== false) {
+            @unlink($relayLogPath);
+        }
+        fwrite(STDERR, "Could not allocate temporary files for the iTerm relay.\n");
+        return 1;
+    }
+
+    @unlink($resultPath);
+    @unlink($relayLogPath);
+
+    $captureTitle = 'soloterm-screen-' . bin2hex(random_bytes(6));
+    $relayCommand = VisualTestRunner::buildRelayCommand(
+        terminal: $terminal,
+        phpBinary: PHP_BINARY,
+        scriptPath: realpath(__FILE__) ?: __FILE__,
+        cwd: getcwd() ?: dirname(__DIR__),
+        originalArgv: $argv,
+        captureTitle: $captureTitle,
+        resultPath: $resultPath,
+        logPath: $relayLogPath,
+    );
+
+    $relayScript = "#!/bin/zsh\n{$relayCommand}\n";
+
+    if (file_put_contents($relayScriptPath, $relayScript) === false || !chmod($relayScriptPath, 0700)) {
+        @unlink($resultPath);
+        @unlink($relayScriptPath);
+        @unlink($relayLogPath);
+        fwrite(STDERR, "Failed to prepare the temporary iTerm relay script.\n");
+        return 1;
+    }
+
+    $launchCommand = buildTerminalLaunchCommand($terminal, $relayScriptPath, $requiredLines, $requiredColumns);
+
+    exec($launchCommand . ' 2>&1', $output, $exitCode);
+
+    if ($exitCode !== 0) {
+        @unlink($resultPath);
+        @unlink($relayScriptPath);
+        @unlink($relayLogPath);
+        fwrite(STDERR, "Failed to launch {$terminal} relay:\n" . implode("\n", $output) . "\n");
+        return 1;
+    }
+
+    echo "Waiting for {$terminal} screenshot run to finish...\n";
+    $keepRelayArtifacts = false;
+
+    try {
+        $deadline = microtime(true) + (60 * 60);
+
+        while (microtime(true) < $deadline) {
+            clearstatcache(true, $resultPath);
+
+            if (is_file($resultPath) && filesize($resultPath) > 0) {
+                $status = trim((string) file_get_contents($resultPath));
+
+                if (!ctype_digit($status)) {
+                    $keepRelayArtifacts = true;
+                    fwrite(STDERR, ucfirst($terminal) . " relay wrote an invalid exit status.\n");
+                    dumpRelayLog($relayLogPath);
+
+                    return 1;
+                }
+
+                $exitStatus = (int) $status;
+
+                if ($exitStatus !== 0) {
+                    $keepRelayArtifacts = true;
+                    fwrite(STDERR, ucfirst($terminal) . " screenshot run failed with exit code {$exitStatus}.\n");
+                    dumpRelayLog($relayLogPath);
+                }
+
+                return $exitStatus;
+            }
+
+            usleep(250_000);
+        }
+
+        $keepRelayArtifacts = true;
+        fwrite(STDERR, "Timed out waiting for the {$terminal} screenshot run to finish.\n");
+        dumpRelayLog($relayLogPath);
+
+        return 1;
+    } finally {
+        if (!$keepRelayArtifacts) {
+            @unlink($resultPath);
+            @unlink($relayScriptPath);
+            if (is_file($relayLogPath)) {
+                @unlink($relayLogPath);
+            }
+        }
+    }
+}
+
+function buildTerminalLaunchCommand(
+    string $terminal,
+    string $relayScriptPath,
+    int $requiredLines,
+    int $requiredColumns
+): string {
+    return match ($terminal) {
+        'iterm' => 'osascript -e ' . escapeshellarg(VisualTestRunner::buildItermLaunchAppleScript($relayScriptPath)),
+        'ghostty' => 'osascript -e ' . escapeshellarg(
+            VisualTestRunner::buildGhosttyLaunchAppleScript($relayScriptPath, $requiredColumns, $requiredLines)
+        ),
+        default => throw new InvalidArgumentException("Unsupported terminal relay target: {$terminal}"),
+    };
+}
+
+function dumpRelayLog(string $relayLogPath, int $maxLines = 80): void
+{
+    if (!is_file($relayLogPath)) {
+        fwrite(STDERR, "Relay log file was not created.\n");
+
+        return;
+    }
+
+    $content = file($relayLogPath, FILE_IGNORE_NEW_LINES);
+
+    if ($content === false) {
+        fwrite(STDERR, "Could not read relay log at {$relayLogPath}.\n");
+
+        return;
+    }
+
+    $tail = array_slice($content, -$maxLines);
+    fwrite(STDERR, "Relay log tail ({$relayLogPath}):\n" . implode("\n", $tail) . "\n");
 }

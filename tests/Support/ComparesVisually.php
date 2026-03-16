@@ -22,6 +22,8 @@ trait ComparesVisually
 
     protected ?array $uniqueTestIdentifier = null;
 
+    protected ?string $resolvedTerminalFixturePath = null;
+
     private ?VisualTestConfig $visualConfig = null;
 
     private ?TerminalEnvironment $terminalEnv = null;
@@ -58,37 +60,49 @@ trait ComparesVisually
             $content = [$content];
         }
 
-        $this->uniqueTestIdentifier = $this->uniqueTestIdentifier();
+        $baseIdentifier = $this->baseTestIdentifier();
+        $this->uniqueTestIdentifier = $this->stableTerminalFixtureIdentifier($baseIdentifier, $content);
+        $this->resolvedTerminalFixturePath = null;
+        $fixture = $this->matchingTerminalFixture($content);
+        [$path, $function] = $baseIdentifier;
+        $fixturesInSync = $this->fixtureStore()->terminalFixturesAreInSyncForContent($path, $function, $content);
+
+        if ($this->visualConfig()->shouldRunVisualTest($fixture !== null, $fixturesInSync)) {
+            $this->terminalEnv()->withOutput(fn() => $this->assertVisualMatch($content));
+
+            return;
+        }
 
         // First, try fixture comparison (fast path)
-        if ($this->tryFixtureMatch($content)) {
+        if ($fixture && $this->fixtureMatchesCurrentOutput($fixture, $content)) {
             $this->assertTrue(true);
 
             return;
         }
 
-        // Fixture didn't match or doesn't exist - fall back to visual comparison if enabled
-        if ($this->visualConfig()->canRunVisualTest()) {
-            $this->terminalEnv()->withOutput(fn() => $this->assertVisualMatch($content));
-        } else {
-            // No visual testing available - run fixture match which will skip or fail appropriately
-            $this->assertFixtureMatch($content);
-        }
+        // No fixture fast-path available - run fixture match which will skip or fail appropriately.
+        $this->assertFixtureMatch($content);
     }
 
     /**
-     * Try to match against a fixture. Returns true if fixture exists and matches.
-     * Returns false if fixture doesn't exist or doesn't match (caller should fall back to visual).
+     * Load the matching terminal fixture for the current test, if one exists.
      */
-    protected function tryFixtureMatch(array $content): bool
+    protected function matchingTerminalFixture(array $content): ?TerminalFixture
     {
-        $fixturePath = $this->terminalFixturePath();
-        $fixture = $this->fixtureStore()->loadTerminalFixture($fixturePath, $content);
+        [$path, $function] = $this->baseTestIdentifier();
+        $match = $this->fixtureStore()->findMatchingTerminalFixture($path, $function, $content);
 
-        if (!$fixture) {
-            return false;
+        if ($match === null) {
+            return null;
         }
 
+        $this->resolvedTerminalFixturePath = $match['path'];
+
+        return $match['fixture'];
+    }
+
+    protected function fixtureMatchesCurrentOutput(TerminalFixture $fixture, array $content): bool
+    {
         $screen = new Screen($fixture->width, $fixture->height);
 
         foreach ($content as $c) {
@@ -101,7 +115,7 @@ trait ComparesVisually
     protected function assertFixtureMatch(array $content): void
     {
         $fixturePath = $this->terminalFixturePath();
-        $fixture = $this->fixtureStore()->loadTerminalFixture($fixturePath, $content);
+        $fixture = $this->matchingTerminalFixture($content);
 
         if (!$fixture) {
             $this->markTestSkipped(
@@ -116,7 +130,7 @@ trait ComparesVisually
             $screen->write($c);
         }
 
-        $this->assertEquals($fixture->output, $screen->output());
+        $this->assertSame($fixture->output, $screen->output());
     }
 
     protected function assertVisualMatch(array $content): void
@@ -221,6 +235,10 @@ trait ComparesVisually
 
     protected function terminalFixturePath(): string
     {
+        if ($this->resolvedTerminalFixturePath !== null) {
+            return $this->resolvedTerminalFixturePath;
+        }
+
         [$path, $function] = $this->uniqueTestIdentifier;
 
         return $this->fixtureStore()->terminalFixturePath($path, $function);
@@ -255,6 +273,26 @@ trait ComparesVisually
      */
     protected function uniqueTestIdentifier(): array
     {
+        [$path, $function] = $this->baseTestIdentifier();
+
+        $key = "$path::$function";
+
+        if (!array_key_exists($key, $this->testsPerMethod)) {
+            $this->testsPerMethod[$key] = 0;
+        }
+
+        return [$path, $function . '_' . ++$this->testsPerMethod[$key]];
+    }
+
+    /**
+     * Find the test method that called into the visual comparison helper.
+     *
+     * @return array{string, string}
+     *
+     * @throws Exception If the caller cannot be found.
+     */
+    protected function baseTestIdentifier(): array
+    {
         foreach (debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS) as $frame) {
             if (str_ends_with($frame['file'] ?? '', 'ComparesVisually.php')) {
                 continue;
@@ -271,20 +309,21 @@ trait ComparesVisually
             if (count($isTest)) {
                 $parts = explode('\\Tests\\', $frame['class'], 2);
                 $path = str_replace('\\', '/', $parts[1]);
-                $function = $frame['function'];
-
-                $key = "$path::$function";
-
-                if (!array_key_exists($key, $this->testsPerMethod)) {
-                    $this->testsPerMethod[$key] = 0;
-                }
-
-                $function = $function . '_' . ++$this->testsPerMethod[$key];
-
-                return [$path, $function];
+                return [$path, $frame['function']];
             }
         }
 
         throw new Exception('Unable to find caller in debug backtrace.');
+    }
+
+    /**
+     * @param  array{string, string}  $baseIdentifier
+     * @return array{string, string}
+     */
+    protected function stableTerminalFixtureIdentifier(array $baseIdentifier, array $content): array
+    {
+        [$path, $function] = $baseIdentifier;
+
+        return [$path, $this->fixtureStore()->stableTerminalFixtureFunction($function, $content)];
     }
 }

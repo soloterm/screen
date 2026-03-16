@@ -12,7 +12,7 @@
     "minimum-stability": "dev",
     "require": {
         "php": "^8.1",
-        "soloterm/grapheme": "^v1.0.1",
+        "soloterm/grapheme": "^v1.1.0",
         "ext-mbstring": "*"
     },
     "require-dev": {
@@ -36,6 +36,9 @@
         "test": "php bin/test",
         "test:screenshots": "php bin/test --screenshots",
         "test:missing": "php bin/test --missing",
+        "test:failed": "php bin/test --failed",
+        "test:screenshots:failed": "php bin/test --screenshots --failed",
+        "test:missing:failed": "php bin/test --missing --failed",
         "test:failures": "php bin/test -- --order-by=defects --stop-on-failure",
         "test:fixtures": "php bin/check-fixtures"
     },

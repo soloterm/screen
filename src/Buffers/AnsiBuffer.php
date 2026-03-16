@@ -60,6 +60,14 @@ class AnsiBuffer extends Buffer
      */
     protected readonly array $background;
 
+    protected array $decorationLookup = [];
+
+    protected array $foregroundLookup = [];
+
+    protected array $backgroundLookup = [];
+
+    protected array $resetLookup = [];
+
     /**
      * The keys are ANSI SGR codes and the values are arbitrary bit values
      * initiated in the constructor allowing for efficient combination
@@ -100,6 +108,10 @@ class AnsiBuffer extends Buffer
         // Standard and bright.
         $this->foreground = [...range(30, 39), ...range(90, 97)];
         $this->background = [...range(40, 49), ...range(100, 107)];
+        $this->decorationLookup = array_fill_keys($this->decoration, true);
+        $this->foregroundLookup = array_fill_keys($this->foreground, true);
+        $this->backgroundLookup = array_fill_keys($this->background, true);
+        $this->resetLookup = array_fill_keys($this->resets, true);
 
         $supported = [
             0, // Reset all styles
@@ -135,6 +147,27 @@ class AnsiBuffer extends Buffer
         ];
     }
 
+    public function getCellValue(): int|array
+    {
+        return $this->cellValue();
+    }
+
+    public function exportState(): array
+    {
+        return [
+            'active' => $this->active,
+            'extendedForeground' => $this->extendedForeground,
+            'extendedBackground' => $this->extendedBackground,
+        ];
+    }
+
+    public function importState(array $state): void
+    {
+        $this->active = $state['active'] ?? 0;
+        $this->extendedForeground = $state['extendedForeground'] ?? null;
+        $this->extendedBackground = $state['extendedBackground'] ?? null;
+    }
+
     public function fillBufferWithActiveFlags(int $row, int $startCol, int $endCol): void
     {
         $this->fill($this->cellValue(), $row, $startCol, $endCol);
@@ -168,6 +201,15 @@ class AnsiBuffer extends Buffer
         return $this->active & $backgroundBitmask;
     }
 
+    public function getBackgroundEraseCellValue(): int|array
+    {
+        if ($this->extendedBackground !== null) {
+            return [0, null, $this->extendedBackground];
+        }
+
+        return $this->getActiveBackground();
+    }
+
     public function compressedAnsiBuffer(): array
     {
         $lines = $this->buffer;
@@ -196,13 +238,13 @@ class AnsiBuffer extends Buffer
                 $turnedOffCodes = $this->ansiCodesFromBits($turnedOffBits);
 
                 foreach ($turnedOffCodes as $code) {
-                    if ($this->codeInRange($code, $this->foreground)) {
+                    if ($this->codeInRange($code, $this->foregroundLookup)) {
                         // If a foreground code was removed, then use code 39 to reset.
                         $resetCodes[] = 39;
-                    } elseif ($this->codeInRange($code, $this->background)) {
+                    } elseif ($this->codeInRange($code, $this->backgroundLookup)) {
                         // If a background code was removed, then use code 49 to reset.
                         $resetCodes[] = 49;
-                    } elseif ($this->codeInRange($code, $this->decoration) && isset($this->decorationResets[$code])) {
+                    } elseif ($this->codeInRange($code, $this->decorationLookup) && isset($this->decorationResets[$code])) {
                         // If a decoration code turned off, apply its reset
                         $resetCodes[] = $this->decorationResets[$code];
                     }
@@ -337,18 +379,18 @@ class AnsiBuffer extends Buffer
         }
 
         // If we're adding a new foreground color, zero out the old ones.
-        if ($this->codeInRange($code, $this->foreground)) {
+        if ($this->codeInRange($code, $this->foregroundLookup)) {
             $this->resetForeground();
         }
 
         // Same for backgrounds.
-        if ($this->codeInRange($code, $this->background)) {
+        if ($this->codeInRange($code, $this->backgroundLookup)) {
             $this->resetBackground();
         }
 
         // If we're adding a decoration, we need to unset the
         // code that disables that specific decoration.
-        if ($this->codeInRange($code, $this->decoration) && isset($this->decorationResets[$code])) {
+        if ($this->codeInRange($code, $this->decorationLookup) && isset($this->decorationResets[$code])) {
             $bitToUnset = $this->decorationResets[$code] ?? null;
             if (isset($this->codes[$bitToUnset])) {
                 $this->active &= ~$this->codes[$bitToUnset];
@@ -357,7 +399,7 @@ class AnsiBuffer extends Buffer
 
         // If we're unsetting a decoration, we need to remove
         // the code that enables that decoration.
-        if ($this->codeInRange($code, $this->resets)) {
+        if ($this->codeInRange($code, $this->resetLookup)) {
             $unset = 0;
             foreach ($this->decorationResets as $decoration => $reset) {
                 if ($code === $reset) {
@@ -398,10 +440,9 @@ class AnsiBuffer extends Buffer
         $this->extendedBackground = null;
     }
 
-    protected function codeInRange(int $code, array $range)
+    protected function codeInRange(int $code, array $lookup)
     {
-        // O(1) lookup vs in_array which is O(n)
-        return isset(array_flip($range)[$code]);
+        return isset($lookup[$code]);
     }
 
     protected function resetCodes($codes)

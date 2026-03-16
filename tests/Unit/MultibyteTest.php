@@ -200,6 +200,18 @@ class MultibyteTest extends TestCase
     }
 
     #[Test]
+    public function test_indic_conjunct_overwrite_visual_fixture(): void
+    {
+        $this->assertTerminalMatch("abc\u{0928}\u{092E}\u{0938}\u{094D}\u{0924}\u{0947}def\e[4D***");
+    }
+
+    #[Test]
+    public function test_indic_conjunct_cursor_position_visual_fixture(): void
+    {
+        $this->assertTerminalMatch("abc\u{0928}\u{092E}\u{0938}\u{094D}\u{0924}\u{0947}def\e[1G\e[6C*");
+    }
+
+    #[Test]
     public function test_tab_with_multibyte(): void
     {
         // Testing tab behavior with multibyte characters

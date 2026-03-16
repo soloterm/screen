@@ -11,15 +11,49 @@ namespace SoloTerm\Screen;
 
 use Closure;
 use Exception;
+use InvalidArgumentException;
 use SoloTerm\Screen\Buffers\AnsiBuffer;
 use SoloTerm\Screen\Buffers\Buffer;
 use SoloTerm\Screen\Buffers\CellBuffer;
 use SoloTerm\Screen\Buffers\PrintableBuffer;
 use SoloTerm\Screen\Buffers\Proxy;
 use Stringable;
+use SoloTerm\Grapheme\Grapheme;
 
 class Screen
 {
+    protected const DEC_SPECIAL_GRAPHICS_MAP = [
+        '`' => '◆',
+        'a' => '▒',
+        'f' => '°',
+        'g' => '±',
+        'h' => '␤',
+        'i' => '␋',
+        'j' => '┘',
+        'k' => '┐',
+        'l' => '┌',
+        'm' => '└',
+        'n' => '┼',
+        'o' => '⎺',
+        'p' => '⎻',
+        'q' => '─',
+        'r' => '⎼',
+        's' => '⎽',
+        't' => '├',
+        'u' => '┤',
+        'v' => '┴',
+        'w' => '┬',
+        'x' => '│',
+        'y' => '≤',
+        'z' => '≥',
+        '{' => 'π',
+        '|' => '≠',
+        '}' => '£',
+        '~' => '·',
+    ];
+
+    protected static ?array $ansiCodeBits = null;
+
     public AnsiBuffer $ansi;
 
     public PrintableBuffer $printable;
@@ -38,7 +72,23 @@ class Screen
 
     protected ?Closure $respondVia = null;
 
+    protected ?Closure $reportUnhandledVia = null;
+
     protected array $stashedCursor = [];
+
+    protected bool $decSpecialGraphicsEnabled = false;
+
+    protected ?array $mainScreenState = null;
+
+    protected bool $alternateScreenActive = false;
+
+    protected Closure $seqNoProvider;
+
+    protected string $pendingAnsi = '';
+
+    protected string $pendingUtf8 = '';
+
+    protected array $pendingClearedRows = [];
 
     /**
      * Monotonically increasing sequence number. Incremented on each buffer modification.
@@ -57,17 +107,21 @@ class Screen
         $this->width = $width;
         $this->height = $height;
 
+        $this->seqNoProvider = fn() => ++$this->seqNo;
+        $this->initializeBuffers();
+    }
+
+    protected function initializeBuffers(): void
+    {
         $this->ansi = new AnsiBuffer;
-        $this->printable = (new PrintableBuffer)->setWidth($width);
+        $this->printable = (new PrintableBuffer)->setWidth($this->width);
         $this->buffers = new Proxy([
             $this->ansi,
             $this->printable
         ]);
 
-        // Wire up sequence number provider to both buffers
-        $seqNoProvider = fn() => ++$this->seqNo;
-        $this->ansi->setSeqNoProvider($seqNoProvider);
-        $this->printable->setSeqNoProvider($seqNoProvider);
+        $this->ansi->setSeqNoProvider($this->seqNoProvider);
+        $this->printable->setSeqNoProvider($this->seqNoProvider);
     }
 
     /**
@@ -89,6 +143,43 @@ class Screen
     public function respondToQueriesVia(Closure $closure): static
     {
         $this->respondVia = $closure;
+
+        return $this;
+    }
+
+    public function reportUnhandledSequencesVia(Closure $closure): static
+    {
+        $this->reportUnhandledVia = $closure;
+
+        return $this;
+    }
+
+    public function resize(int $width, int $height): static
+    {
+        if ($width < 1 || $height < 1) {
+            throw new InvalidArgumentException('Screen dimensions must be at least 1x1.');
+        }
+
+        $oldHeight = $this->height;
+        $this->width = $width;
+        $this->height = $height;
+
+        $this->printable->resizeWidth($width);
+        $this->ansi->resizeWidth($width);
+        $this->clampViewportToVisibleContent();
+        $this->markVisibleRowsDirty();
+
+        if ($height < $oldHeight) {
+            $this->pendingClearedRows = array_values(array_unique([
+                ...$this->pendingClearedRows,
+                ...range($height + 1, $oldHeight),
+            ]));
+            sort($this->pendingClearedRows);
+        }
+
+        if ($this->mainScreenState !== null) {
+            $this->mainScreenState = $this->resizeScreenState($this->mainScreenState, $width, $height);
+        }
 
         return $this;
     }
@@ -164,6 +255,8 @@ class Screen
             $parts[] = $this->renderLine($lineIndex, $line, $ansi[$lineIndex] ?? []);
         }
 
+        $parts[] = $this->renderPendingClearedRows(relativeToSavedCursor: true);
+
         return implode('', $parts);
     }
 
@@ -180,7 +273,7 @@ class Screen
         $changedRows = $this->printable->getChangedRows($sinceSeqNo);
 
         // Early return if nothing changed
-        if (empty($changedRows)) {
+        if (empty($changedRows) && empty($this->pendingClearedRows)) {
             return '';
         }
 
@@ -209,10 +302,13 @@ class Screen
 
             // Position cursor at start of this line, then render
             $parts[] = "\033[{$visibleRow};1H";
+            $parts[] = "\033[0m";
             $parts[] = $this->renderLine($lineIndex, $line, $ansiForLine);
             // Clear to end of line to handle shortened content
             $parts[] = "\033[K";
         }
+
+        $parts[] = $this->renderPendingClearedRows();
 
         return implode('', $parts);
     }
@@ -301,6 +397,10 @@ class Screen
 
     public function write(string $content): static
     {
+        $content = $this->pendingAnsi . $this->pendingUtf8 . $content;
+        $this->pendingAnsi = '';
+        $this->pendingUtf8 = '';
+
         // Backspace character gets replaced with "move one column backwards."
         // Carriage returns get replaced with a code to move to column 0.
         $content = str_replace(
@@ -309,18 +409,34 @@ class Screen
             subject: $content
         );
 
+        [$content, $this->pendingAnsi] = $this->splitTrailingIncompleteAnsi($content);
+
+        if ($content === '') {
+            return $this;
+        }
+
         // Split the line by ANSI codes using the fast state machine parser.
         // Each item in the resulting array will be a set of printable characters
         // or a ParsedAnsi object.
         $parts = AnsiParser::parseFast($content);
 
-        foreach ($parts as $part) {
+        $partsCount = count($parts);
+
+        foreach ($parts as $index => $part) {
             if ($part instanceof Stringable) {
                 // ParsedAnsi or AnsiMatch object
-                if ($part->command) {
+                if ($part->command !== null) {
                     $this->handleAnsiCode($part);
                 }
             } else {
+                if ($part === '') {
+                    continue;
+                }
+
+                if ($index === $partsCount - 1) {
+                    [$part, $this->pendingUtf8] = $this->splitTrailingIncompleteUtf8($part);
+                }
+
                 if ($part === '') {
                     continue;
                 }
@@ -339,6 +455,115 @@ class Screen
         }
 
         return $this;
+    }
+
+    /**
+     * Split trailing incomplete ANSI sequence from the content so it can be
+     * completed by a subsequent write() call.
+     *
+     * @return array{string, string}
+     */
+    protected function splitTrailingIncompleteAnsi(string $content): array
+    {
+        $lastEsc = strrpos($content, "\x1B");
+
+        if ($lastEsc === false) {
+            return [$content, ''];
+        }
+
+        $tail = substr($content, $lastEsc);
+
+        if (!$this->trailingAnsiSequenceIsIncomplete($tail)) {
+            return [$content, ''];
+        }
+
+        return [substr($content, 0, $lastEsc), $tail];
+    }
+
+    protected function trailingAnsiSequenceIsIncomplete(string $tail): bool
+    {
+        if ($tail === '' || $tail[0] !== "\x1B") {
+            return false;
+        }
+
+        if (strlen($tail) === 1) {
+            return true;
+        }
+
+        $next = $tail[1];
+
+        if ($next === '[') {
+            $i = 2;
+            $len = strlen($tail);
+
+            while ($i < $len) {
+                $ord = ord($tail[$i]);
+
+                if ($ord >= 0x30 && $ord <= 0x3F) {
+                    $i++;
+                    continue;
+                }
+
+                if ($ord >= 0x20 && $ord <= 0x2F) {
+                    $i++;
+                    continue;
+                }
+
+                return !($ord >= 0x40 && $ord <= 0x7E);
+            }
+
+            return true;
+        }
+
+        if ($next === ']') {
+            $i = 2;
+            $len = strlen($tail);
+
+            while ($i < $len) {
+                if ($tail[$i] === "\x07" || $tail[$i] === "\x9C") {
+                    return false;
+                }
+
+                if ($tail[$i] === "\x1B" && $i + 1 < $len && $tail[$i + 1] === '\\') {
+                    return false;
+                }
+
+                $i++;
+            }
+
+            return true;
+        }
+
+        if ($next === '(' || $next === ')' || $next === '#') {
+            return strlen($tail) < 3;
+        }
+
+        return false;
+    }
+
+    /**
+     * Split a trailing incomplete UTF-8 byte sequence from a printable chunk so
+     * it can be completed by a subsequent write() call.
+     *
+     * @return array{string, string}
+     */
+    protected function splitTrailingIncompleteUtf8(string $content): array
+    {
+        if ($content === '' || mb_check_encoding($content, 'UTF-8')) {
+            return [$content, ''];
+        }
+
+        $maxTailLength = min(3, strlen($content));
+
+        for ($tailLength = 1; $tailLength <= $maxTailLength; $tailLength++) {
+            $prefix = substr($content, 0, -$tailLength);
+
+            if ($prefix === '' || mb_check_encoding($prefix, 'UTF-8')) {
+                return [$prefix, substr($content, -$tailLength)];
+            }
+        }
+
+        return ['', $content];
     }
 
     public function writeln(string $content): void
@@ -360,6 +585,14 @@ class Screen
         $command = $ansi->command;
         $param = $ansi->params;
 
+        if ($command === null) {
+            return;
+        }
+
+        if (($command === '(' || $command === ')') && $this->handleCharsetSelection($ansi)) {
+            return;
+        }
+
         // Some commands have a default of zero and some have a default of one. Just
         // make both options and decide within the body of the if statement.
         // We could do a match here but it doesn't seem worth it.
@@ -369,7 +602,6 @@ class Screen
         if ($command === 'A') {
             // Cursor up
             $this->moveCursorRow(relative: -$paramDefaultOne);
-
         } elseif ($command === 'B') {
             // Cursor down
             $this->moveCursorRow(relative: $paramDefaultOne);
@@ -402,6 +634,12 @@ class Screen
         } elseif ($command === 'I') {
             $this->handleTabulationMove($paramDefaultOne);
 
+        } elseif ($command === 'M') {
+            $this->handleReverseIndex();
+
+        } elseif ($command === '@') {
+            $this->handleInsertCharacters(max(1, $paramDefaultOne));
+
         } elseif ($command === 'J') {
             $this->handleEraseDisplay($paramDefaultZero);
 
@@ -411,13 +649,25 @@ class Screen
         } elseif ($command === 'L') {
             $this->handleInsertLines($paramDefaultOne);
 
+        } elseif ($command === 'P') {
+            $this->handleDeleteCharacters(max(1, $paramDefaultOne));
+
         } elseif ($command === 'S') {
             $this->handleScrollUp($paramDefaultOne);
 
         } elseif ($command === 'T') {
             $this->handleScrollDown($paramDefaultOne);
 
-        } elseif ($command === 'l' || $command === 'h') {
+        } elseif ($command === 'X') {
+            $this->handleEraseCharacters(max(1, $paramDefaultOne));
+
+        } elseif ($param === '?1049' && $command === 'h') {
+            $this->enterAlternateScreen();
+
+        } elseif ($param === '?1049' && $command === 'l') {
+            $this->exitAlternateScreen();
+
+        } elseif (($param === '?25' || $param === '25' || $param === '') && ($command === 'l' || $command === 'h')) {
             // Show/hide cursor. We simply ignore these.
 
         } elseif ($command === 'm') {
@@ -437,9 +687,83 @@ class Screen
         } elseif ($command === 'n' && $param === '6') {
             // Ask for the cursor position.
             $this->handleQueryCode($command, $param);
+
+        } else {
+            $this->reportUnhandledSequence($ansi);
+        }
+    }
+
+    protected function handleCharsetSelection(AnsiMatch|ParsedAnsi $ansi): bool
+    {
+        if (!($ansi instanceof ParsedAnsi) || strlen($ansi->raw) < 3) {
+            return false;
         }
 
-        // @TODO Unhandled ansi command. Throw an error? Log it?
+        if ($ansi->command !== '(') {
+            return false;
+        }
+
+        $this->decSpecialGraphicsEnabled = $ansi->raw[2] === '0';
+
+        return true;
+    }
+
+    protected function handleReverseIndex(): void
+    {
+        if ($this->cursorRow === $this->linesOffScreen) {
+            $this->handleScrollDown(1);
+
+            return;
+        }
+
+        $this->moveCursorRow(relative: -1);
+    }
+
+    protected function enterAlternateScreen(): void
+    {
+        if ($this->alternateScreenActive) {
+            return;
+        }
+
+        $this->mainScreenState = [
+            'ansi' => clone $this->ansi,
+            'printable' => clone $this->printable,
+            'cursorRow' => $this->cursorRow,
+            'cursorCol' => $this->cursorCol,
+            'linesOffScreen' => $this->linesOffScreen,
+            'stashedCursor' => $this->stashedCursor,
+            'decSpecialGraphicsEnabled' => $this->decSpecialGraphicsEnabled,
+        ];
+
+        $this->initializeBuffers();
+        $this->cursorRow = 0;
+        $this->cursorCol = 0;
+        $this->linesOffScreen = 0;
+        $this->stashedCursor = [];
+        $this->decSpecialGraphicsEnabled = false;
+        $this->alternateScreenActive = true;
+    }
+
+    protected function exitAlternateScreen(): void
+    {
+        if (!$this->alternateScreenActive || $this->mainScreenState === null) {
+            return;
+        }
+
+        $this->ansi = $this->mainScreenState['ansi'];
+        $this->printable = $this->mainScreenState['printable'];
+        $this->buffers = new Proxy([
+            $this->ansi,
+            $this->printable,
+        ]);
+        $this->cursorRow = $this->mainScreenState['cursorRow'];
+        $this->cursorCol = $this->mainScreenState['cursorCol'];
+        $this->linesOffScreen = $this->mainScreenState['linesOffScreen'];
+        $this->stashedCursor = $this->mainScreenState['stashedCursor'];
+        $this->decSpecialGraphicsEnabled = $this->mainScreenState['decSpecialGraphicsEnabled'];
+        $this->mainScreenState = null;
+        $this->alternateScreenActive = false;
+        $this->markVisibleRowsDirty();
     }
 
     protected function newlineWithScroll()
@@ -460,6 +784,16 @@ class Screen
             return;
         }
 
+        $text = $this->mergeLeadingGraphemeExtensions($text);
+
+        if ($text === '') {
+            return;
+        }
+
+        if ($this->decSpecialGraphicsEnabled) {
+            $text = strtr($text, self::DEC_SPECIAL_GRAPHICS_MAP);
+        }
+
         $this->printable->expand($this->cursorRow);
 
         [$advance, $remainder] = $this->printable->writeString($this->cursorRow, $this->cursorCol, $text);
@@ -476,22 +810,180 @@ class Screen
         }
     }
 
+    protected function handleDeleteCharacters(int $count): void
+    {
+        $row = $this->cursorRow;
+        $blankAnsi = $this->ansi->getBackgroundEraseCellValue();
+        $printable = $this->normalizedRow($this->printable->buffer[$row] ?? [], ' ');
+        $ansi = $this->normalizedRow($this->ansi->buffer[$row] ?? [], 0);
+
+        array_splice($printable, $this->cursorCol, $count);
+        array_splice($ansi, $this->cursorCol, $count);
+
+        $printable = array_slice(array_pad($printable, $this->width, ' '), 0, $this->width);
+        $ansi = array_slice(array_pad($ansi, $this->width, $blankAnsi), 0, $this->width);
+
+        [$printable, $ansi] = $this->trimTrailingCells($printable, $ansi);
+
+        $this->printable[$row] = $printable;
+        $this->ansi[$row] = $ansi;
+    }
+
+    protected function handleInsertCharacters(int $count): void
+    {
+        $row = $this->cursorRow;
+        $blankAnsi = $this->ansi->getBackgroundEraseCellValue();
+        $printable = $this->normalizedRow($this->printable->buffer[$row] ?? [], ' ');
+        $ansi = $this->normalizedRow($this->ansi->buffer[$row] ?? [], 0);
+
+        array_splice($printable, $this->cursorCol, 0, array_fill(0, $count, ' '));
+        array_splice($ansi, $this->cursorCol, 0, array_fill(0, $count, $blankAnsi));
+
+        $printable = array_slice($printable, 0, $this->width);
+        $ansi = array_slice($ansi, 0, $this->width);
+
+        [$printable, $ansi] = $this->trimTrailingCells($printable, $ansi);
+
+        $this->printable[$row] = $printable;
+        $this->ansi[$row] = $ansi;
+    }
+
+    protected function handleEraseCharacters(int $count): void
+    {
+        $row = $this->cursorRow;
+        $endCol = min($this->width - 1, $this->cursorCol + $count - 1);
+        $blankAnsi = $this->ansi->getBackgroundEraseCellValue();
+        $printable = $this->normalizedRow($this->printable->buffer[$row] ?? [], ' ');
+        $ansi = $this->normalizedRow($this->ansi->buffer[$row] ?? [], 0);
+
+        for ($col = $this->cursorCol; $col <= $endCol; $col++) {
+            $printable[$col] = ' ';
+            $ansi[$col] = $blankAnsi;
+        }
+
+        [$printable, $ansi] = $this->trimTrailingCells($printable, $ansi);
+
+        $this->printable[$row] = $printable;
+        $this->ansi[$row] = $ansi;
+    }
+
+    protected function normalizedRow(array $row, mixed $default): array
+    {
+        return array_replace(array_fill(0, $this->width, $default), $row);
+    }
+
+    protected function trimTrailingDefaultValues(array $row, mixed $default): array
+    {
+        while ($row !== [] && end($row) === $default) {
+            array_pop($row);
+        }
+
+        return $row;
+    }
+
+    protected function trimTrailingCells(array $printable, array $ansi): array
+    {
+        $lastIndex = max(count($printable), count($ansi)) - 1;
+
+        while ($lastIndex >= 0) {
+            $printableCell = $printable[$lastIndex] ?? ' ';
+            $ansiCell = $ansi[$lastIndex] ?? 0;
+
+            if ($printableCell !== ' ' || $ansiCell !== 0) {
+                break;
+            }
+
+            $lastIndex--;
+        }
+
+        if ($lastIndex < 0) {
+            return [[], []];
+        }
+
+        return [
+            array_slice($printable, 0, $lastIndex + 1),
+            array_slice($ansi, 0, $lastIndex + 1),
+        ];
+    }
+
     public function saveCursor()
     {
         $this->stashedCursor = [
-            $this->cursorCol,
-            $this->cursorRow - $this->linesOffScreen
+            'col' => $this->cursorCol,
+            'row' => $this->cursorRow - $this->linesOffScreen,
+            'ansiState' => $this->ansi->exportState(),
+            'decSpecialGraphicsEnabled' => $this->decSpecialGraphicsEnabled,
         ];
     }
 
     public function restoreCursor()
     {
         if ($this->stashedCursor) {
-            [$col, $row] = $this->stashedCursor;
+            $col = $this->stashedCursor['col'] ?? $this->stashedCursor[0] ?? 0;
+            $row = $this->stashedCursor['row'] ?? $this->stashedCursor[1] ?? 0;
             $this->moveCursorCol(absolute: $col);
             $this->moveCursorRow(absolute: $row);
-            $this->stashedCursor = [];
+
+            if (isset($this->stashedCursor['ansiState'])) {
+                $this->ansi->importState($this->stashedCursor['ansiState']);
+            }
+
+            if (array_key_exists('decSpecialGraphicsEnabled', $this->stashedCursor)) {
+                $this->decSpecialGraphicsEnabled = $this->stashedCursor['decSpecialGraphicsEnabled'];
+            }
         }
+    }
+
+    protected function mergeLeadingGraphemeExtensions(string $text): string
+    {
+        if ($this->cursorCol === 0 || $text === '') {
+            return $text;
+        }
+
+        if (!preg_match('/\A((?:\p{M}|[\x{FE00}-\x{FE0F}]|[\x{1F3FB}-\x{1F3FF}])+)(.*)\z/us', $text, $matches)) {
+            return $text;
+        }
+
+        $extension = $matches[1];
+        $remainder = $matches[2];
+        $row = $this->cursorRow;
+
+        if (!isset($this->printable->buffer[$row])) {
+            return $text;
+        }
+
+        $previousCol = $this->cursorCol - 1;
+        while (
+            $previousCol >= 0
+            && array_key_exists($previousCol, $this->printable->buffer[$row])
+            && $this->printable->buffer[$row][$previousCol] === null
+        ) {
+            $previousCol--;
+        }
+
+        if ($previousCol < 0) {
+            return $text;
+        }
+
+        $previous = $this->printable->buffer[$row][$previousCol] ?? ' ';
+        if ($previous === ' ' || $previous === '') {
+            return $text;
+        }
+
+        $combined = $previous . $extension;
+        $oldWidth = max(0, Grapheme::wcwidth($previous));
+
+        $this->printable->writeString($row, $previousCol, $combined);
+        $newWidth = max(0, Grapheme::wcwidth($combined));
+        $fillWidth = max($oldWidth, $newWidth);
+
+        if ($fillWidth > 0) {
+            $this->ansi->fillBufferWithActiveFlags($row, $previousCol, $previousCol + $fillWidth - 1);
+        }
+
+        $this->cursorCol = $previousCol + $newWidth;
+
+        return $remainder;
     }
 
     public function moveCursorCol(?int $absolute = null, ?int $relative = null)
@@ -500,7 +992,7 @@ class Screen
 
         // Inside this method, position is zero-based.
 
-        $max = $this->width;
+        $max = $this->width - 1;
         $min = 0;
 
         $position = $this->cursorCol;
@@ -512,7 +1004,6 @@ class Screen
         if (!is_null($relative)) {
             // Relative movements cannot put the cursor at the very end, only absolute
             // movements can. Not sure why, but I verified the behavior manually.
-            $max -= 1;
             $position += $relative;
         }
 
@@ -611,7 +1102,7 @@ class Screen
     protected function handleAbsoluteMove(string $params)
     {
         if ($params !== '') {
-            [$row, $col] = explode(';', $params);
+            [$row, $col] = array_pad(explode(';', $params, 2), 2, '');
             $row = $row === '' ? 1 : intval($row);
             $col = $col === '' ? 1 : intval($col);
         } else {
@@ -695,6 +1186,62 @@ class Screen
         }
     }
 
+    protected function clampViewportToVisibleContent(): void
+    {
+        $totalRows = max(count($this->printable->buffer), $this->cursorRow + 1);
+        $maxLinesOffScreen = max(0, $totalRows - $this->height);
+
+        $this->linesOffScreen = min(max($this->linesOffScreen, 0), $maxLinesOffScreen);
+        $this->cursorCol = min(max($this->cursorCol, 0), $this->width);
+
+        $minVisibleRow = $this->linesOffScreen;
+        $maxVisibleRow = $this->linesOffScreen + $this->height - 1;
+        $this->cursorRow = min(max($this->cursorRow, $minVisibleRow), $maxVisibleRow);
+    }
+
+    protected function resizeScreenState(array $state, int $width, int $height): array
+    {
+        $state['printable']->resizeWidth($width);
+        $state['ansi']->resizeWidth($width);
+
+        $totalRows = max(count($state['printable']->buffer), ($state['cursorRow'] ?? 0) + 1);
+        $maxLinesOffScreen = max(0, $totalRows - $height);
+
+        $state['linesOffScreen'] = min(max($state['linesOffScreen'] ?? 0, 0), $maxLinesOffScreen);
+        $state['cursorCol'] = min(max($state['cursorCol'] ?? 0, 0), $width);
+
+        $minVisibleRow = $state['linesOffScreen'];
+        $maxVisibleRow = $state['linesOffScreen'] + $height - 1;
+        $state['cursorRow'] = min(max($state['cursorRow'] ?? 0, $minVisibleRow), $maxVisibleRow);
+
+        return $state;
+    }
+
+    protected function renderPendingClearedRows(bool $relativeToSavedCursor = false): string
+    {
+        if ($this->pendingClearedRows === []) {
+            return '';
+        }
+
+        $parts = [];
+
+        foreach ($this->pendingClearedRows as $row) {
+            if ($relativeToSavedCursor) {
+                $parts[] = "\0338";
+                if ($row > 1) {
+                    $parts[] = "\033[" . ($row - 1) . 'B';
+                }
+                $parts[] = "\033[K";
+            } else {
+                $parts[] = "\033[{$row};1H\033[K";
+            }
+        }
+
+        $this->pendingClearedRows = [];
+
+        return implode('', $parts);
+    }
+
     protected function handleScrollDown(int $param): void
     {
         $stash = $this->cursorRow;
@@ -735,7 +1282,7 @@ class Screen
 
             if ($background !== 0) {
                 $this->printable->fill(' ', $this->cursorRow, $this->cursorCol, $this->width - 1);
-                $this->ansi->fill($background, $this->cursorRow, $this->cursorCol, $this->width - 1);
+                $this->ansi->fill($this->ansi->getBackgroundEraseCellValue(), $this->cursorRow, $this->cursorCol, $this->width - 1);
             }
         } elseif ($param == 1) {
             // \e[1K - Erase start of line to the cursor
@@ -762,9 +1309,9 @@ class Screen
         $response = match ($param . $command) {
             // Foreground color
             // @TODO not hardcode this, somehow
-            '?10' => "\e]10;rgb:0000/0000/0000 \e \\",
+            '?10' => "\e]10;rgb:0000/0000/0000\e\\",
             // Background
-            '?11' => "\e]11;rgb:FFFF/FFFF/FFFF \e \\",
+            '?11' => "\e]11;rgb:FFFF/FFFF/FFFF\e\\",
             // Cursor
             '6n' => "\e[" . ($this->cursorRow + 1) . ';' . ($this->cursorCol + 1) . 'R',
             default => null,
@@ -773,6 +1320,15 @@ class Screen
         if ($response) {
             call_user_func($this->respondVia, $response);
         }
+    }
+
+    protected function reportUnhandledSequence(AnsiMatch|ParsedAnsi $ansi): void
+    {
+        if (!is_callable($this->reportUnhandledVia)) {
+            return;
+        }
+
+        call_user_func($this->reportUnhandledVia, (string) $ansi);
     }
 
     /**
@@ -833,29 +1389,10 @@ class Screen
      */
     protected function extractStyleFromBits(int $bits): array
     {
-        // The AnsiBuffer assigns bits to codes in the order they're added to $supported:
-        // 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 22-29, 30-39, 40-49, 90-97, 100-107
-        // Each gets a sequential bit (1, 2, 4, 8, 16, ...)
-
         $style = 0;
         $fg = null;
         $bg = null;
-
-        // Build the code-to-bit mapping (matching AnsiBuffer::initialize)
-        $supported = [
-            0, // bit 0 (value 1)
-            1, 2, 3, 4, 5, 6, 7, 8, 9, // bits 1-9 (values 2, 4, 8, ...)
-            22, 23, 24, 25, 26, 27, 28, 29, // decoration resets
-            30, 31, 32, 33, 34, 35, 36, 37, 38, 39, // foreground
-            40, 41, 42, 43, 44, 45, 46, 47, 48, 49, // background
-            90, 91, 92, 93, 94, 95, 96, 97, // bright foreground
-            100, 101, 102, 103, 104, 105, 106, 107, // bright background
-        ];
-
-        $codesBits = [];
-        foreach ($supported as $i => $code) {
-            $codesBits[$code] = 1 << $i;
-        }
+        $codesBits = self::ansiCodeBits();
 
         // Extract decoration style (codes 1-9 -> Cell style bits 0-8)
         for ($code = 1; $code <= 9; $code++) {
@@ -881,5 +1418,30 @@ class Screen
         }
 
         return [$style, $fg, $bg];
+    }
+
+    protected static function ansiCodeBits(): array
+    {
+        if (self::$ansiCodeBits !== null) {
+            return self::$ansiCodeBits;
+        }
+
+        $supported = [
+            0,
+            1, 2, 3, 4, 5, 6, 7, 8, 9,
+            22, 23, 24, 25, 26, 27, 28, 29,
+            30, 31, 32, 33, 34, 35, 36, 37, 38, 39,
+            40, 41, 42, 43, 44, 45, 46, 47, 48, 49,
+            90, 91, 92, 93, 94, 95, 96, 97,
+            100, 101, 102, 103, 104, 105, 106, 107,
+        ];
+
+        self::$ansiCodeBits = [];
+
+        foreach ($supported as $i => $code) {
+            self::$ansiCodeBits[$code] = 1 << $i;
+        }
+
+        return self::$ansiCodeBits;
     }
 }

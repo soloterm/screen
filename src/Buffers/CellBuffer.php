@@ -9,6 +9,7 @@
 
 namespace SoloTerm\Screen\Buffers;
 
+use SoloTerm\Grapheme\Grapheme;
 use SoloTerm\Screen\Cell;
 use SoloTerm\Screen\Output\CursorOptimizer;
 use SoloTerm\Screen\Output\StyleTracker;
@@ -682,7 +683,7 @@ class CellBuffer
             $parts[] = $cell->char;
 
             // Track cursor position after character
-            $cursor->advance(1);
+            $cursor->advance(max(0, Grapheme::wcwidth($cell->char)));
         }
 
         // Reset styles at the end if needed
