@@ -152,10 +152,8 @@ $screen->write("\e[38;2;128;0;255;48;2;255;255;0mPurple on yellow\e[0m\n");
 | Sequence | Name | Effect |
 |----------|------|--------|
 | `\e[<r>;<c>H` | CUP | Move to row r, column c |
-| `\e[<r>;<c>f` | HVP | Same as CUP |
 | `\e[H` | Home | Move to row 1, column 1 |
 | `\e[<n>G` | CHA | Move to column n |
-| `\e[<n>d` | VPA | Move to row n |
 
 **Note:** Row and column are 1-indexed in ANSI (row 1 is the top).
 
@@ -192,7 +190,6 @@ $screen->write("\e[2D");   // Left 2 columns
 | Sequence | Name | Effect |
 |----------|------|--------|
 | `\e[<n>I` | CHT | Move forward n tab stops |
-| `\e[<n>Z` | CBT | Move back n tab stops |
 
 ## Erasing
 
@@ -203,7 +200,6 @@ $screen->write("\e[2D");   // Left 2 columns
 | `\e[J` or `\e[0J` | ED | Clear from cursor to end of screen |
 | `\e[1J` | ED | Clear from start of screen to cursor |
 | `\e[2J` | ED | Clear entire screen |
-| `\e[3J` | ED | Clear entire screen + scrollback |
 
 **Examples:**
 
@@ -228,6 +224,22 @@ $screen->write("\e[2K");   // Clear line
 $screen->write("\e[K");    // Clear to end of line
 ```
 
+## Character Editing
+
+| Sequence | Name | Effect |
+|----------|------|--------|
+| `\e[<n>@` | ICH | Insert n blank character cells at cursor |
+| `\e[<n>P` | DCH | Delete n character cells at cursor |
+| `\e[<n>X` | ECH | Erase n character cells at cursor |
+
+**Examples:**
+
+```php
+$screen->write("abcdef");
+$screen->write("\e[1G\e[2@--"); // Insert 2 cells near start, then write '--'
+$screen->write("\e[1G\e[3P");   // Delete 3 cells from cursor
+```
+
 ## Scrolling
 
 | Sequence | Name | Effect |
@@ -235,7 +247,6 @@ $screen->write("\e[K");    // Clear to end of line
 | `\e[<n>S` | SU | Scroll up n lines (content moves up) |
 | `\e[<n>T` | SD | Scroll down n lines (content moves down) |
 | `\e[<n>L` | IL | Insert n blank lines at cursor |
-| `\e[<n>M` | DL | Delete n lines at cursor |
 
 **Examples:**
 
@@ -243,6 +254,12 @@ $screen->write("\e[K");    // Clear to end of line
 $screen->write("\e[5S");   // Scroll up 5 lines
 $screen->write("\e[3L");   // Insert 3 blank lines
 ```
+
+## Reverse Index
+
+| Sequence | Name | Effect |
+|----------|------|--------|
+| `\eM` | RI | Move cursor up one row; scroll down when at top |
 
 ## Cursor Visibility
 
@@ -265,8 +282,6 @@ $screen->write("\e[?25h");  // Show cursor
 |----------|------|--------|
 | `\e7` | DECSC | Save cursor position and attributes |
 | `\e8` | DECRC | Restore cursor position and attributes |
-| `\e[s` | SCP | Save cursor position (ANSI.SYS) |
-| `\e[u` | RCP | Restore cursor position (ANSI.SYS) |
 
 **Examples:**
 
@@ -277,12 +292,12 @@ $screen->write("Temporary");
 $screen->write("\e8");           // Restore position
 ```
 
-## Terminal Reset
+## Alternate Screen Buffer
 
 | Sequence | Name | Effect |
 |----------|------|--------|
-| `\ec` | RIS | Full terminal reset |
-| `\e[!p` | DECSTR | Soft terminal reset |
+| `\e[?1049h` | DECSET 1049 | Enter alternate screen |
+| `\e[?1049l` | DECRST 1049 | Exit alternate screen and restore main screen |
 
 ## Combining Sequences
 
@@ -309,13 +324,16 @@ Screen converts these to equivalent ANSI sequences internally.
 
 ## Unsupported Sequences
 
-The following are parsed but not fully implemented:
+The following are parsed but not fully implemented (or intentionally ignored):
 
-- Character set selection (`\e(`, `\e)`)
+- `\e[<r>;<c>f` (HVP) and `\e[<n>d` (VPA)
+- `\e[<n>Z` (CBT), `\e[s`, `\e[u`, `\e[3J`, `\e[!p`, `\ec`
 - Most OSC sequences (title setting, etc.)
 - Mouse tracking
 - Keyboard remapping
 - Some terminal modes
+
+`\e(0` (DEC special graphics / line-drawing charset) is partially supported for common box-drawing workflows.
 
 Unsupported sequences are safely ignored without affecting buffer state.
 

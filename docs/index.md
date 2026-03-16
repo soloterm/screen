@@ -166,6 +166,14 @@ Input String ("Hello \e[31mWorld\e[0m")
 - **OS**: Any (pure PHP, no system dependencies)
 - **Architecture**: 64-bit (for bitmask operations)
 
+## Testing And CI Snapshot
+
+- `composer test` is the fast default path and uses saved fixtures when available.
+- `composer test:screenshots` and `composer test:missing` run through fresh macOS terminal relays for stable capture sizing.
+- CI runs on Linux across PHP `8.1` through `8.5`.
+- CI fails on missing-fixture test output and then runs `composer test:fixtures` to enforce fixture parity/dimensions.
+- A small set of multibyte parity edge cases is intentionally validated on macOS fixture flows and skipped on non-Darwin.
+
 ## Next Steps
 
 - [Installation](installation) - Get Screen set up in your project

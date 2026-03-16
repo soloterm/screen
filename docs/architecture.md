@@ -220,14 +220,15 @@ ParsedAnsi {
 **CSI Sequences** (`\e[...`):
 - Cursor movement: A, B, C, D, E, F, G, H, I
 - Erase: J (display), K (line)
-- Scroll: S (up), T (down), L (insert lines)
+- Character editing: @ (insert chars), P (delete chars), X (erase chars)
+- Scroll/layout: S (up), T (down), L (insert lines)
 - SGR: m (colors and styles)
-- Modes: h, l (cursor visibility, etc.)
+- Modes: `?1049h` / `?1049l` (alternate screen), `?25h` / `?25l` (cursor visibility)
 
 **Simple Escapes**:
 - `\e7` - Save cursor (DECSC)
 - `\e8` - Restore cursor (DECRC)
-- `\ec` - Reset terminal
+- `\eM` - Reverse index (RI)
 
 **OSC Sequences** (`\e]...`):
 - Title setting and color queries

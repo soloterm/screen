@@ -416,8 +416,11 @@ composer test
 | Command | Description |
 |---------|-------------|
 | `composer test` | Run tests without screenshot generation |
-| `composer test:screenshots` | Generate fixtures in a fresh terminal window (defaults to current terminal if supported) |
-| `composer test:missing` | Generate only missing or out-of-sync fixtures in both iTerm and Ghostty |
+| `composer test:screenshots` | Generate fixtures in a fresh relay window (auto-targets a supported terminal, or use `--terminal`) |
+| `composer test:missing` | Generate missing or out-of-sync fixtures in fresh iTerm and Ghostty relays (or one terminal via `--terminal`) |
+| `composer test:failed` | Re-run only tests that failed in the previous wrapped PHPUnit run |
+| `composer test:screenshots:failed` | Re-run last failed tests in screenshot mode |
+| `composer test:missing:failed` | Re-run last failed tests in missing-fixture mode |
 | `composer test:failures` | Re-run failed tests first, stop on first failure |
 | `composer test:fixtures` | Validate fixture integrity across terminals |
 
@@ -435,6 +438,9 @@ composer test:missing -- --filter="MultibyteTest"
 
 # Restrict missing-fixture generation to one terminal
 composer test:missing -- --terminal=ghostty --filter="MultibyteTest"
+
+# Re-run only previously failing tests
+composer test:failed
 ```
 
 ### Visual testing
@@ -465,8 +471,9 @@ This ensures Screen's rendering accurately matches real terminal behavior for:
 - iTerm2 or Ghostty terminal
 - ImageMagick (`brew install imagemagick`)
 
-The test runner will automatically resize your terminal window to the required dimensions (180x32) for iTerm. For
-Ghostty, you'll be prompted to resize manually.
+`composer test:screenshots` and `composer test:missing` launch fresh terminal relay windows to keep capture dimensions
+consistent with CI. iTerm is resized automatically to 180x32; Ghostty is opened to a calibrated window size and prompts
+if dimensions still need adjustment.
 
 ### Fixture structure
 
@@ -486,6 +493,27 @@ tests/Fixtures/
 When running tests without screenshot generation, the system uses stored fixtures for comparison, making tests fast and
 suitable for CI/CD pipelines. In CI (where no terminal is available), iTerm fixtures are used since we validate that
 iTerm and Ghostty fixtures are identical.
+
+### CI Behavior
+
+The `Tests` workflow enforces fixture hygiene and parity across a Linux PHP matrix:
+
+- Runs on `ubuntu-latest` with PHP `8.1`, `8.2`, `8.3`, `8.4`, and `8.5`
+- Fails the job if PHPUnit output reports missing fixtures (`Fixture with correct content does not exist` or `Fixture does not exist for`)
+- Runs `composer test:fixtures` after tests to enforce cross-terminal fixture parity and required dimensions
+
+Current workflow action majors are modernized to avoid stale runtime warnings:
+
+- `actions/checkout@v6`
+- `actions/cache@v5`
+- `stefanzweifel/git-auto-commit-action@v7`
+
+### Platform Caveats
+
+Two specific multibyte parity edge cases are intentionally validated on macOS only and skipped on non-Darwin runners:
+
+- `MultibyteTest::test_line_wrapping_with_multibyte`
+- `ReplayCorpusTest::multibyte_cursor_transcript_matches_full_replay_under_random_byte_chunking`
 
 ## Contributing
 

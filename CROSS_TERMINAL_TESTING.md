@@ -62,11 +62,21 @@ ComparesVisually (trait)           - Test API facade
 
 ### Terminal Detection
 
-The `VisualTestConfig` class detects the current terminal by checking the `TERM_PROGRAM` environment variable:
+`VisualTestConfig` detects the active terminal from `TERM_PROGRAM`, and the relay runner can force terminal identity via `SOLOTERM_SCREEN_FORCED_TERMINAL`:
 
 ```php
 private static function detectTerminal(): ?string
 {
+    $forced = getenv('SOLOTERM_SCREEN_FORCED_TERMINAL');
+
+    if ($forced !== false && $forced !== '') {
+        return match (strtolower($forced)) {
+            'iterm', 'iterm2' => 'iterm',
+            'ghostty' => 'ghostty',
+            default => null,
+        };
+    }
+
     $termProgram = getenv('TERM_PROGRAM');
 
     if ($termProgram === 'iTerm.app') {
@@ -81,7 +91,7 @@ private static function detectTerminal(): ?string
 }
 ```
 
-There's no override mechanism—tests must run in the actual terminal. This ensures fixtures are genuinely generated and validated in each environment, not faked.
+In normal local usage, you still run from a real terminal app. The forced override is used internally by fresh-window relay runs so fixture generation can target iTerm and Ghostty deterministically.
 
 ## Two Types of Visual Tests
 
@@ -174,12 +184,17 @@ composer test
 # Run all tests with screenshot generation
 composer test:screenshots
 
-# Generate only missing fixtures
+# Generate missing or out-of-sync fixtures in both terminals
 composer test:missing
+
+# Re-run only the previously failing tests
+composer test:failed
 
 # Pass filters to PHPUnit
 composer test:screenshots -- --filter=positioning
 ```
+
+When screenshot modes are requested, `bin/test` launches a fresh relay terminal window (unless already inside a relay) to keep dimensions and capture state stable.
 
 ### Terminal-Specific Behavior
 
@@ -208,7 +223,7 @@ private function resizeIterm(): bool
 
 ## CI Validation
 
-The GitHub Actions workflow runs on every push and PR:
+The GitHub Actions workflow runs on every push to `main` and on pull requests. It currently tests PHP `8.1` through `8.5` on Linux.
 
 ```yaml
 - name: Execute tests
@@ -217,40 +232,26 @@ The GitHub Actions workflow runs on every push and PR:
     COLUMNS: 180
   run: |
     vendor/bin/phpunit 2>&1 | tee phpunit-output.txt
-    # Fail if fixtures are missing on main branch
-    if [ "${{ github.ref }}" = "refs/heads/main" ]; then
-      if grep -q "Fixture with correct content does not exist" phpunit-output.txt; then
-        echo "::error::Missing fixtures on main branch"
-        exit 1
-      fi
+    TEST_EXIT_CODE=${PIPESTATUS[0]}
+    if grep -qE "Fixture (with correct content does not exist|does not exist for)" phpunit-output.txt; then
+      echo "::error::Tests have missing fixtures. All fixtures must be generated before merge."
+      exit 1
     fi
+    exit $TEST_EXIT_CODE
 ```
 
-More importantly, CI validates that **both terminals have fixtures and they match**:
+CI then runs fixture parity checks with:
 
 ```yaml
 - name: Validate terminal fixtures match
-  run: |
-    # Find all iterm fixtures and verify ghostty equivalents exist and match
-    find tests/Fixtures/iterm -name "*.json" -type f | while read iterm_file; do
-      ghostty_file="${iterm_file/iterm/ghostty}"
-      
-      if [ ! -f "$ghostty_file" ]; then
-        echo "::error::Missing Ghostty fixture for: $iterm_file"
-        exit 1
-      fi
-      
-      if ! diff -q "$iterm_file" "$ghostty_file" > /dev/null; then
-        echo "::error::Fixture mismatch between terminals: $iterm_file"
-        exit 1
-      fi
-    done
+  if: always()
+  run: composer test:fixtures
 ```
 
 This ensures:
-
+      
 1. **Every fixture exists for both terminals** — you can't merge code that was only tested in one terminal
-2. **Fixtures are identical** — if they differ, it indicates a rendering difference that needs investigation
+2. **Fixtures are semantically equivalent** (`width`, `height`, `output`) — checksum-only differences are reported as warnings, not hard failures
 
 ## The Developer Workflow
 
@@ -269,29 +270,28 @@ public function my_new_visual_feature()
 }
 ```
 
-### Step 2: Generate Fixture in iTerm2
+### Step 2: Generate Fixtures In Both Terminals
 
 ```bash
-# Open iTerm2
-composer test:screenshots -- --filter=my_new_visual_feature
+# Launches fresh iTerm and Ghostty relays sequentially
+composer test:missing -- --filter=my_new_visual_feature
 ```
 
-The test runs, displays the output, and asks for confirmation. If it looks right, press `y` to save the fixture.
+This is the fastest "normal" flow because it only regenerates missing/out-of-sync fixtures.
 
-### Step 3: Generate Fixture in Ghostty
+### Step 3: (Optional) Force A Single Terminal
 
 ```bash
-# Open Ghostty
-composer test:screenshots -- --filter=my_new_visual_feature
+# Useful for focused debugging
+composer test:screenshots -- --terminal=ghostty --filter=my_new_visual_feature
 ```
 
-Same process—the test prompts for confirmation and saves the Ghostty fixture.
+Use this when iterating on one terminal first, then run `test:missing` to complete parity.
 
 ### Step 4: Verify Fixtures Match
 
 ```bash
-diff tests/Fixtures/Renders/iterm/Unit/MyTest/my_new_visual_feature.json \
-     tests/Fixtures/Renders/ghostty/Unit/MyTest/my_new_visual_feature.json
+composer test:fixtures
 ```
 
 If they differ, investigate why! This usually indicates a terminal compatibility issue that needs fixing.
@@ -337,7 +337,7 @@ The goal is that **identical code produces identical output** in all supported t
 
 3. **Fixture churn** — Any output change requires regenerating fixtures in both terminals.
 
-4. **Binary fixtures** — Screenshot fixtures are images, which don't diff well in code review.
+4. **Relay-based test setup** — Launching fresh terminal windows is slower than pure unit tests, but yields much more stable visual captures.
 
 For a TUI library where visual correctness is critical, these trade-offs are worth it.
 

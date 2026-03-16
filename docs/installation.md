@@ -101,9 +101,27 @@ composer test:missing
 
 # Limit to one terminal window when needed
 composer test:missing -- --terminal=iterm
+
+# Validate fixture dimensions + cross-terminal parity
+composer test:fixtures
+
+# Re-run only last failures
+composer test:failed
 ```
 
-The test system automatically detects which terminal you're using and stores fixtures in terminal-specific directories (`tests/Fixtures/iterm/` or `tests/Fixtures/ghostty/`).
+`composer test:screenshots` and `composer test:missing` run in fresh terminal relay windows to keep dimensions aligned with CI (`180x32`).
+
+- iTerm is resized automatically.
+- Ghostty opens in a calibrated window size and prompts if manual adjustment is still needed.
+- `composer test:missing` without `--terminal` runs both iTerm and Ghostty relays and requires both apps to be installed.
+
+Fixtures are stored in terminal-specific directories (`tests/Fixtures/iterm/` and `tests/Fixtures/ghostty/`).
+
+### CI Notes
+
+The `Tests` workflow runs on Linux across PHP `8.1` to `8.5` and enforces fixture quality by failing on missing-fixture test output and running `composer test:fixtures`.
+
+Two known multibyte parity edge-case tests are intentionally skipped on non-Darwin runners and validated on macOS fixture generation flows.
 
 ## Configuration
 
