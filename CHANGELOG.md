@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **CellBuffer ANSI decode mapping** - `Screen::toCellBuffer()` now decodes ANSI bitmasks with the same foreground/background code ordering used by `AnsiBuffer`, preventing background leakage after foreground resets (with regression coverage for focused/blurred tab-style transitions)
+
 ## [1.1.3] - 2026-03-16
 
 ### Added
@@ -25,7 +29,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Wide-character invalidation correctness** - Overwriting a continuation cell now invalidates the lead cell span so incremental sync and differential output preserve wide-character behavior
 - **Incremental ANSI correctness** - Partial style changes, continuation cells, clears, and viewport movement now invalidate the correct visible regions during reusable frame sync
-- **CellBuffer ANSI decode mapping** - `Screen::toCellBuffer()` now decodes ANSI bitmasks with the same foreground/background code ordering used by `AnsiBuffer`, preventing background leakage after foreground resets (with regression coverage for focused/blurred tab-style transitions)
 
 
 ## [1.1.2] - 2026-03-16
