@@ -10,15 +10,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Cross-terminal testing** - Visual testing now supports multiple terminals (iTerm and Ghostty) with terminal-specific fixture directories
-- **Fixture checking script** - New `bin/check-fixtures` script to verify all visual test fixtures are present
+- **Fixture checking script** - New `bin/check-fixtures` script to verify terminal fixture dimensions and cross-terminal parity
+- **Last-failure rerun commands** - Added `composer test:failed`, `composer test:screenshots:failed`, and `composer test:missing:failed` for faster CI/debug loops
 
 ### Changed
 
 - **Rendering uses relative cursor positioning** - `Screen::output()` now uses DECSC/DECRC (save/restore cursor) with CUD (cursor down) instead of newlines between lines, avoiding "pending wrap" terminal inconsistencies and enabling correct rendering at any offset in a parent TUI
+- **Screenshot test execution flow** - Screenshot and missing-fixture modes now run in fresh terminal relays for more stable capture conditions and CI-sized dimensions
+- **CI workflow modernization** - Updated workflow actions to `actions/checkout@v6`, `actions/cache@v5`, and `stefanzweifel/git-auto-commit-action@v7`
+- **Documentation refresh** - Updated README and docs pages to match current CI behavior, test runner commands, and supported ANSI coverage
 
 ### Fixed
 
 - **Pending wrap terminal inconsistencies** - Different terminals handle full-width lines differently when using `\n`; new relative positioning approach eliminates this issue
+- **Missing fixture CI gating** - Tests now fail when PHPUnit output reports missing fixtures and always run fixture parity checks via `composer test:fixtures`
+- **Linux parity edge cases** - Added non-Darwin skip guards for two known multibyte visual/parity tests while keeping macOS as the validation environment for those cases
 
 ## [1.1.1] - 2025-12-14
 
