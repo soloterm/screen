@@ -147,7 +147,7 @@ class ResizeRoadmapTest extends TestCase
     private function rowText(CellBuffer $buffer, int $row): string
     {
         return rtrim(implode('', array_map(
-            static fn (Cell $cell) => $cell->char,
+            static fn(Cell $cell) => $cell->char,
             $buffer->getRow($row)
         )));
     }

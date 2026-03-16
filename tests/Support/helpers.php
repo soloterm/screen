@@ -16,11 +16,11 @@ if (!function_exists('retry')) {
      *
      * @param  int|array<int, int>  $times
      * @param  callable(int): TValue  $callback
-     * @param  int|\Closure(int, \Throwable): int  $sleepMilliseconds
-     * @param  (callable(\Throwable): bool)|null  $when
+     * @param  int|Closure(int, Throwable): int  $sleepMilliseconds
+     * @param  (callable(Throwable): bool)|null  $when
      * @return TValue
      *
-     * @throws \Throwable
+     * @throws Throwable
      */
     function retry($times, callable $callback, $sleepMilliseconds = 0, $when = null)
     {

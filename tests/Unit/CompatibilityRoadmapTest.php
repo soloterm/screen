@@ -33,7 +33,7 @@ class CompatibilityRoadmapTest extends TestCase
         $screen = new Screen(20, 5);
 
         $screen->write("abc\nxyz\e[2;");
-        $screen->write("1H@");
+        $screen->write('1H@');
 
         $this->assertSame('abc', $screen->printable->lines()[0]);
         $this->assertSame('@yz', $screen->printable->lines()[1]);

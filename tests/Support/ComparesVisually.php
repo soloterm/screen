@@ -309,6 +309,7 @@ trait ComparesVisually
             if (count($isTest)) {
                 $parts = explode('\\Tests\\', $frame['class'], 2);
                 $path = str_replace('\\', '/', $parts[1]);
+
                 return [$path, $frame['function']];
             }
         }

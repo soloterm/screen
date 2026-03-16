@@ -49,8 +49,7 @@ class TerminalEnvironmentTest extends TestCase
         echo 'inner';
 
         $levelsBefore = ob_get_level();
-        $environment->withOutput(static function (): void {
-        });
+        $environment->withOutput(static function (): void {});
         $levelsAfter = ob_get_level();
 
         $inner = ob_get_clean();

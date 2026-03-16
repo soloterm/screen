@@ -42,7 +42,7 @@ class ReplayCorpusTest extends TestCase
     public function alternate_screen_and_charset_transcript_matches_full_replay_under_random_byte_chunking(): void
     {
         $this->assertChunkedOperationsParity([
-            "main menu",
+            'main menu',
             "\e[?1049h",
             "\e(0lqqk\e(B",
             "\nalt body",
@@ -55,11 +55,11 @@ class ReplayCorpusTest extends TestCase
     public function multibyte_cursor_transcript_matches_full_replay_under_random_byte_chunking(): void
     {
         $this->assertChunkedOperationsParity([
-            "🙂🙂🙂",
+            '🙂🙂🙂',
             "\e[1G",
-            "文",
+            '文',
             "\e[2B",
-            "❤️ done",
+            '❤️ done',
         ], 80, 8);
     }
 
@@ -68,7 +68,7 @@ class ReplayCorpusTest extends TestCase
     {
         $this->assertChunkedOperationsParity([
             implode(PHP_EOL, array_map(
-                static fn (int $line) => sprintf("\e[3%dmline %02d\e[39m", ($line % 7) + 1, $line),
+                static fn(int $line) => sprintf("\e[3%dmline %02d\e[39m", ($line % 7) + 1, $line),
                 range(1, 18)
             )),
         ], 80, 6);

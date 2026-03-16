@@ -45,7 +45,7 @@ final class LastFailedTestStore
         }
 
         return array_values(array_filter(
-            array_map(static fn ($test): ?string => is_string($test) && $test !== '' ? $test : null, $data['tests'])
+            array_map(static fn($test): ?string => is_string($test) && $test !== '' ? $test : null, $data['tests'])
         ));
     }
 
@@ -58,7 +58,7 @@ final class LastFailedTestStore
         }
 
         $patterns = array_map(
-            static fn (string $test): string => preg_quote($test, '/'),
+            static fn(string $test): string => preg_quote($test, '/'),
             $tests,
         );
 

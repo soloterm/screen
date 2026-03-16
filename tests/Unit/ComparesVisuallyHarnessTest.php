@@ -85,9 +85,7 @@ final class ComparesVisuallyHarness extends TestCase
         $this->environment = new HarnessTerminalEnvironment($config, $this->calls);
     }
 
-    public function runTest(): void
-    {
-    }
+    public function runTest(): void {}
 
     public function runAssertTerminalMatch(array|string $content, bool $iterate = false): void
     {

@@ -28,7 +28,7 @@ class VisualFixtureStoreTest extends TestCase
         $store = $this->makeStore();
 
         $invalid = $store->checksumFor(["A\xFFB"]);
-        $replacement = $store->checksumFor(["A?B"]);
+        $replacement = $store->checksumFor(['A?B']);
 
         $this->assertNotSame($invalid, $replacement);
         $this->assertSame($invalid, $store->checksumFor(["A\xFFB"]));

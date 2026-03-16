@@ -12,13 +12,13 @@ namespace SoloTerm\Screen;
 use Closure;
 use Exception;
 use InvalidArgumentException;
+use SoloTerm\Grapheme\Grapheme;
 use SoloTerm\Screen\Buffers\AnsiBuffer;
 use SoloTerm\Screen\Buffers\Buffer;
 use SoloTerm\Screen\Buffers\CellBuffer;
 use SoloTerm\Screen\Buffers\PrintableBuffer;
 use SoloTerm\Screen\Buffers\Proxy;
 use Stringable;
-use SoloTerm\Grapheme\Grapheme;
 
 class Screen
 {
@@ -501,11 +501,13 @@ class Screen
 
                 if ($ord >= 0x30 && $ord <= 0x3F) {
                     $i++;
+
                     continue;
                 }
 
                 if ($ord >= 0x20 && $ord <= 0x2F) {
                     $i++;
+
                     continue;
                 }
 

@@ -21,37 +21,44 @@ final class VisualTestRunner
 
             if ($arg === '--') {
                 $passthrough = true;
+
                 continue;
             }
 
             if (!$passthrough && ($arg === '--screenshots' || $arg === '-s')) {
                 $screenshots = true;
+
                 continue;
             }
 
             if (!$passthrough && ($arg === '--missing' || $arg === '-m')) {
                 $missingOnly = true;
+
                 continue;
             }
 
             if (!$passthrough && $arg === '--failed') {
                 $failedOnly = true;
+
                 continue;
             }
 
             if (!$passthrough && ($arg === '--terminal' || $arg === '-t')) {
                 $requestedTerminal = self::normalizeTerminal($args[$i + 1] ?? null);
                 $i++;
+
                 continue;
             }
 
             if (!$passthrough && str_starts_with($arg, '--terminal=')) {
                 $requestedTerminal = self::normalizeTerminal(substr($arg, 11));
+
                 continue;
             }
 
             if (!$passthrough && $arg === '--iterm') {
                 $requestedTerminal = 'iterm';
+
                 continue;
             }
 
@@ -220,8 +227,8 @@ final class VisualTestRunner
     public static function escapeAppleScriptString(string $value): string
     {
         return str_replace(
-            ["\\", '"'],
-            ["\\\\", '\\"'],
+            ['\\', '"'],
+            ['\\\\', '\\"'],
             $value,
         );
     }
@@ -248,6 +255,7 @@ final class VisualTestRunner
 
             if ($arg === '--terminal' || $arg === '-t') {
                 $i++;
+
                 continue;
             }
 
