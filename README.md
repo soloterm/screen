@@ -416,8 +416,8 @@ composer test
 | Command | Description |
 |---------|-------------|
 | `composer test` | Run tests without screenshot generation |
-| `composer test:screenshots` | Generate all fixtures (requires iTerm or Ghostty) |
-| `composer test:missing` | Generate only missing or out-of-sync fixtures |
+| `composer test:screenshots` | Generate fixtures in a fresh terminal window (defaults to current terminal if supported) |
+| `composer test:missing` | Generate only missing or out-of-sync fixtures in both iTerm and Ghostty |
 | `composer test:failures` | Re-run failed tests first, stop on first failure |
 | `composer test:fixtures` | Validate fixture integrity across terminals |
 
@@ -427,8 +427,14 @@ You can pass additional PHPUnit options using `--`:
 # Run only emoji tests with screenshots
 composer test:screenshots -- --filter="emoji"
 
+# Run screenshots in a specific terminal window
+composer test:screenshots -- --terminal=iterm --filter="emoji"
+
 # Generate missing fixtures for a specific test class
 composer test:missing -- --filter="MultibyteTest"
+
+# Restrict missing-fixture generation to one terminal
+composer test:missing -- --terminal=ghostty --filter="MultibyteTest"
 ```
 
 ### Visual testing

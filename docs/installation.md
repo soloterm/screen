@@ -94,10 +94,13 @@ To enable screenshot tests:
 
 ```bash
 # Generate all fixtures
-ENABLE_SCREENSHOT_TESTING=1 composer test
+composer test:screenshots
 
-# Generate only missing fixtures
-ENABLE_SCREENSHOT_TESTING=2 composer test
+# Generate only missing or out-of-sync fixtures in both terminals
+composer test:missing
+
+# Limit to one terminal window when needed
+composer test:missing -- --terminal=iterm
 ```
 
 The test system automatically detects which terminal you're using and stores fixtures in terminal-specific directories (`tests/Fixtures/iterm/` or `tests/Fixtures/ghostty/`).

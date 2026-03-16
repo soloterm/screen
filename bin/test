@@ -12,7 +12,7 @@ use SoloTerm\Screen\Tests\Support\VisualTestRunner;
  * Usage:
  *   composer test                    Run tests without screenshot generation
  *   composer test:screenshots        Generate all screenshots/fixtures (requires iTerm or Ghostty)
- *   composer test:missing            Generate missing fixtures or regenerate out-of-sync fixtures
+ *   composer test:missing            Generate missing fixtures or regenerate out-of-sync fixtures in both terminals
  *   composer test:failed             Re-run only the tests that failed in the last wrapped PHPUnit run
  *   composer test:fixtures           Validate fixtures are in sync between terminals
  *   composer test:screenshots -- --terminal=iterm
@@ -58,12 +58,31 @@ if ($screenshots || $missingOnly) {
         exit(1);
     }
 
-    // Detect terminal - no override allowed
+    // Detect terminal (relay executions force this value via environment)
     $terminal = detectTerminal();
+    $isRelayExecution = isRelayExecution();
 
-    if (VisualTestRunner::shouldLaunchInFreshTerminal($requestedTerminal, $options->screenshotModeRequested())) {
-        echo "Launching screenshot tests in a fresh {$requestedTerminal} window...\n";
-        exit(launchTerminalRelay($argv, $requestedTerminal, $requiredLines, $requiredColumns));
+    if (VisualTestRunner::shouldLaunchInFreshTerminal($options->screenshotModeRequested(), $isRelayExecution)) {
+        if ($missingOnly && $requestedTerminal === null) {
+            exit(runMissingAcrossTerminals($argv, $requiredLines, $requiredColumns));
+        }
+
+        $targetTerminal = $requestedTerminal ?? resolveDefaultLaunchTerminal($terminal);
+
+        if ($targetTerminal === null) {
+            fwrite(STDERR, "Screenshot testing requires iTerm or Ghostty.\n");
+            fwrite(STDERR, "Could not detect a supported terminal to launch automatically.\n");
+            fwrite(STDERR, "Specify one explicitly: composer test:screenshots -- --terminal=iterm\n");
+            exit(1);
+        }
+
+        if (!terminalAppInstalled($targetTerminal)) {
+            fwrite(STDERR, ucfirst($targetTerminal) . " is not installed, but it was requested for screenshot testing.\n");
+            exit(1);
+        }
+
+        echo "Launching screenshot tests in a fresh {$targetTerminal} window...\n";
+        exit(launchTerminalRelay($argv, $targetTerminal, $requiredLines, $requiredColumns));
     }
 
     if ($requestedTerminal !== null && $terminal !== $requestedTerminal) {
@@ -72,11 +91,8 @@ if ($screenshots || $missingOnly) {
     }
 
     if (!$terminal) {
-        fwrite(STDERR, "Screenshot testing requires iTerm or Ghostty.\n");
+        fwrite(STDERR, "Screenshot relay requires iTerm or Ghostty, but terminal detection failed.\n");
         fwrite(STDERR, "Current terminal: " . (getenv('TERM_PROGRAM') ?: 'unknown') . "\n");
-        fwrite(STDERR, "\n");
-        fwrite(STDERR, "Please run this command directly in iTerm or Ghostty.\n");
-        fwrite(STDERR, "Or launch a fresh terminal automatically with: composer test:screenshots -- --terminal=iterm\n");
         exit(1);
     }
 
@@ -183,6 +199,74 @@ function detectTerminal(): ?string
     }
 
     return null;
+}
+
+function isRelayExecution(): bool
+{
+    $forced = getenv('SOLOTERM_SCREEN_FORCED_TERMINAL');
+
+    return is_string($forced) && $forced !== '';
+}
+
+function runMissingAcrossTerminals(array $argv, int $requiredLines, int $requiredColumns): int
+{
+    $targets = ['iterm', 'ghostty'];
+
+    foreach ($targets as $target) {
+        if (!terminalAppInstalled($target)) {
+            fwrite(STDERR, ucfirst($target) . " is required for composer test:missing but is not installed.\n");
+
+            return 1;
+        }
+    }
+
+    foreach ($targets as $target) {
+        echo "Launching missing fixture run in a fresh {$target} window...\n";
+        $exitCode = launchTerminalRelay($argv, $target, $requiredLines, $requiredColumns);
+
+        if ($exitCode !== 0) {
+            fwrite(STDERR, ucfirst($target) . " missing fixture run failed with exit code {$exitCode}.\n");
+
+            return $exitCode;
+        }
+    }
+
+    echo "Completed missing fixture runs in both iTerm and Ghostty.\n";
+
+    return 0;
+}
+
+function resolveDefaultLaunchTerminal(?string $detectedTerminal): ?string
+{
+    if ($detectedTerminal !== null) {
+        return $detectedTerminal;
+    }
+
+    foreach (['iterm', 'ghostty'] as $candidate) {
+        if (terminalAppInstalled($candidate)) {
+            return $candidate;
+        }
+    }
+
+    return null;
+}
+
+function terminalAppInstalled(string $terminal): bool
+{
+    $application = match ($terminal) {
+        'iterm' => 'iTerm2',
+        'ghostty' => 'Ghostty',
+        default => null,
+    };
+
+    if ($application === null) {
+        return false;
+    }
+
+    $script = sprintf('id of application "%s"', $application);
+    exec('osascript -e ' . escapeshellarg($script) . ' 2>/dev/null', $output, $exitCode);
+
+    return $exitCode === 0;
 }
 
 /**

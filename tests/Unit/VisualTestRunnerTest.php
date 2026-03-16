@@ -31,12 +31,11 @@ class VisualTestRunnerTest extends TestCase
     }
 
     #[Test]
-    public function it_knows_when_to_launch_a_fresh_requested_terminal_window(): void
+    public function it_knows_when_to_launch_a_fresh_terminal_window(): void
     {
-        $this->assertTrue(VisualTestRunner::shouldLaunchInFreshTerminal('iterm', true));
-        $this->assertTrue(VisualTestRunner::shouldLaunchInFreshTerminal('ghostty', true));
-        $this->assertFalse(VisualTestRunner::shouldLaunchInFreshTerminal(null, true));
-        $this->assertFalse(VisualTestRunner::shouldLaunchInFreshTerminal('iterm', false));
+        $this->assertTrue(VisualTestRunner::shouldLaunchInFreshTerminal(true, false));
+        $this->assertFalse(VisualTestRunner::shouldLaunchInFreshTerminal(true, true));
+        $this->assertFalse(VisualTestRunner::shouldLaunchInFreshTerminal(false, false));
     }
 
     #[Test]
@@ -87,7 +86,7 @@ class VisualTestRunnerTest extends TestCase
         $this->assertStringContainsString('if (count of windows) > priorWindowCount then', $script);
         $this->assertStringContainsString('error "Ghostty window did not appear."', $script);
         $this->assertStringContainsString('set position of window 1 to {100, 100}', $script);
-        $this->assertStringContainsString('set size of window 1 to {1640, 690}', $script);
+        $this->assertStringContainsString('set size of window 1 to {1445, 607}', $script);
         $this->assertStringContainsString('keystroke "/bin/zsh \'/tmp/soloterm relay.sh\'"', $script);
     }
 

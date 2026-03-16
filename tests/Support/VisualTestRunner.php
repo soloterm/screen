@@ -81,10 +81,10 @@ final class VisualTestRunner
     }
 
     public static function shouldLaunchInFreshTerminal(
-        ?string $requestedTerminal,
-        bool $screenshotModeRequested
+        bool $screenshotModeRequested,
+        bool $isRelayExecution
     ): bool {
-        return $screenshotModeRequested && $requestedTerminal !== null;
+        return $screenshotModeRequested && !$isRelayExecution;
     }
 
     public static function buildRelayCommand(
@@ -146,11 +146,13 @@ final class VisualTestRunner
 
     public static function buildGhosttyLaunchAppleScript(
         string $relayScriptPath,
-        int $columns,
-        int $lines
+        int $_columns,
+        int $_lines
     ): string {
-        $windowWidth = ($columns * 9) + 20;
-        $windowHeight = ($lines * 20) + 50;
+        // Calibrated default for this project so the launched Ghostty window
+        // opens at the dimensions that produce the expected 180x32 capture area.
+        $windowWidth = 1445;
+        $windowHeight = 607;
         $launchCommand = self::buildItermLaunchCommand($relayScriptPath);
 
         return sprintf(

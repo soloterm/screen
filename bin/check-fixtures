@@ -14,6 +14,7 @@
 
 $fixturesDir = __DIR__ . '/../tests/Fixtures';
 $errors = [];
+$warnings = [];
 $checked = 0;
 $dimensionErrors = [];
 $dimensionsChecked = 0;
@@ -50,7 +51,8 @@ $checked += checkFixtureDirectory(
     $fixturesDir . '/ghostty',
     'iterm',
     'ghostty',
-    $errors
+    $errors,
+    $warnings
 );
 
 // Check render fixtures (tests/Fixtures/Renders/{iterm,ghostty}/...)
@@ -59,7 +61,8 @@ $checked += checkFixtureDirectory(
     $fixturesDir . '/Renders/ghostty',
     'iterm',
     'ghostty',
-    $errors
+    $errors,
+    $warnings
 );
 
 if (count($errors) > 0) {
@@ -80,6 +83,16 @@ if ($checked === 0) {
     echo "✓ All {$checked} fixture pair(s) validated successfully.\n";
 }
 
+if (count($warnings) > 0) {
+    echo "\nWARNINGS:\n\n";
+    foreach ($warnings as $warning) {
+        echo "  ! {$warning}\n";
+    }
+    echo "\n";
+    echo "Found " . count($warnings) . " warning(s).\n";
+    echo "Checksum-only drift does not affect rendering parity, but consider regenerating fixtures to normalize metadata.\n";
+}
+
 exit(0);
 
 /**
@@ -92,7 +105,8 @@ function checkFixtureDirectory(
     string $dir2,
     string $name1,
     string $name2,
-    array &$errors
+    array &$errors,
+    array &$warnings
 ): int {
     $checked = 0;
 
@@ -105,10 +119,18 @@ function checkFixtureDirectory(
 
             if (!file_exists($otherFile)) {
                 $errors[] = "Missing {$name2} fixture for: {$relPath}";
-            } elseif (!filesMatch($file, $otherFile)) {
-                $errors[] = "Fixture mismatch between terminals for: {$relPath}";
             } else {
-                $checked++;
+                $comparison = compareFixtureFiles($file, $otherFile);
+
+                if ($comparison['match']) {
+                    $checked++;
+
+                    if ($comparison['checksumOnly']) {
+                        $warnings[] = "Checksum differs across terminals for: {$relPath}";
+                    }
+                } else {
+                    $errors[] = "Fixture mismatch between terminals for: {$relPath} ({$comparison['reason']})";
+                }
             }
         }
     }
@@ -154,11 +176,105 @@ function findJsonFiles(string $dir): array
 }
 
 /**
- * Check if two files have identical content.
+ * Compare fixture files semantically.
+ *
+ * For terminal fixtures, width/height/output must match. Checksum is ignored
+ * for parity checks so legacy checksum algorithm migrations don't fail CI.
+ *
+ * For render fixtures, output must match.
+ *
+ * @return array{match: bool, reason: string, checksumOnly: bool}
  */
-function filesMatch(string $file1, string $file2): bool
+function compareFixtureFiles(string $file1, string $file2): array
 {
-    return file_get_contents($file1) === file_get_contents($file2);
+    $raw1 = file_get_contents($file1);
+    $raw2 = file_get_contents($file2);
+
+    if ($raw1 === false || $raw2 === false) {
+        return [
+            'match' => false,
+            'reason' => 'could not read fixture file',
+            'checksumOnly' => false,
+        ];
+    }
+
+    if ($raw1 === $raw2) {
+        return [
+            'match' => true,
+            'reason' => '',
+            'checksumOnly' => false,
+        ];
+    }
+
+    $data1 = json_decode($raw1, true);
+    $data2 = json_decode($raw2, true);
+
+    if (!is_array($data1) || !is_array($data2)) {
+        return [
+            'match' => false,
+            'reason' => 'raw JSON differs',
+            'checksumOnly' => false,
+        ];
+    }
+
+    $isTerminalFixture1 = array_key_exists('width', $data1)
+        || array_key_exists('height', $data1)
+        || array_key_exists('checksum', $data1);
+    $isTerminalFixture2 = array_key_exists('width', $data2)
+        || array_key_exists('height', $data2)
+        || array_key_exists('checksum', $data2);
+
+    if ($isTerminalFixture1 || $isTerminalFixture2) {
+        $terminalFields = ['width', 'height', 'output'];
+
+        foreach ($terminalFields as $field) {
+            if (!array_key_exists($field, $data1) || !array_key_exists($field, $data2)) {
+                return [
+                    'match' => false,
+                    'reason' => "missing '{$field}' in terminal fixture payload",
+                    'checksumOnly' => false,
+                ];
+            }
+
+            if ($data1[$field] !== $data2[$field]) {
+                return [
+                    'match' => false,
+                    'reason' => "terminal fixture '{$field}' differs",
+                    'checksumOnly' => false,
+                ];
+            }
+        }
+
+        $checksumOnly = ($data1['checksum'] ?? null) !== ($data2['checksum'] ?? null);
+
+        return [
+            'match' => true,
+            'reason' => '',
+            'checksumOnly' => $checksumOnly,
+        ];
+    }
+
+    if (array_key_exists('output', $data1) && array_key_exists('output', $data2)) {
+        if ($data1['output'] !== $data2['output']) {
+            return [
+                'match' => false,
+                'reason' => 'render fixture output differs',
+                'checksumOnly' => false,
+            ];
+        }
+
+        return [
+            'match' => true,
+            'reason' => '',
+            'checksumOnly' => false,
+        ];
+    }
+
+    return [
+        'match' => false,
+        'reason' => 'unrecognized fixture payload shape',
+        'checksumOnly' => false,
+    ];
 }
 
 /**
