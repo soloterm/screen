@@ -7,9 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.4] - 2026-03-16
+
 ### Fixed
 
 - **CellBuffer ANSI decode mapping** - `Screen::toCellBuffer()` now decodes ANSI bitmasks with the same foreground/background code ordering used by `AnsiBuffer`, preventing background leakage after foreground resets (with regression coverage for focused/blurred tab-style transitions)
+
 
 ## [1.1.3] - 2026-03-16
 
@@ -107,5 +110,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Support for cursor movement, colors, styles, and screen clearing
 - Unicode and wide character support via Grapheme library
 - Visual testing system with screenshot comparison
+[1.1.4]: https://github.com/soloterm/screen/compare/v1.1.3...v1.1.4
 [1.1.3]: https://github.com/soloterm/screen/compare/v1.1.2...v1.1.3
 [1.1.2]: https://github.com/soloterm/screen/compare/v1.1.1...v1.1.2
