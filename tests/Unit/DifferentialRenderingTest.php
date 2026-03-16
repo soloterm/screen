@@ -178,6 +178,42 @@ class DifferentialRenderingTest extends TestCase
     }
 
     #[Test]
+    public function differential_output_starts_at_the_first_changed_column_when_the_tail_is_unchanged(): void
+    {
+        $screen = new Screen(80, 24);
+
+        $screen->write('prefix-middle-suffix');
+        $screen->output();
+        $seqNo = $screen->getLastRenderedSeqNo();
+
+        $screen->write("\033[1;8HXYZ");
+
+        $diffOutput = $screen->output($seqNo);
+
+        $this->assertStringContainsString("\033[1;8H", $diffOutput);
+        $this->assertStringNotContainsString("\033[1;1H", $diffOutput);
+        $this->assertStringNotContainsString("\033[K", $diffOutput);
+        $this->assertStringContainsString('XYZ', $diffOutput);
+    }
+
+    #[Test]
+    public function differential_output_backtracks_to_the_lead_cell_when_a_wide_character_continuation_changes(): void
+    {
+        $screen = new Screen(20, 4);
+
+        $screen->write('ab文def');
+        $screen->output();
+        $seqNo = $screen->getLastRenderedSeqNo();
+
+        $screen->write("\033[1;4HX");
+
+        $diffOutput = $screen->output($seqNo);
+
+        $this->assertStringContainsString("\033[1;3H", $diffOutput);
+        $this->assertStringContainsString(' X', $diffOutput);
+    }
+
+    #[Test]
     public function scroll_marks_visible_rows_dirty(): void
     {
         $screen = new Screen(80, 10);

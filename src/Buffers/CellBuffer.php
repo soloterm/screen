@@ -134,6 +134,22 @@ class CellBuffer
     }
 
     /**
+     * Record the source sequence number a row is synced to.
+     */
+    public function setLineSeqNo(int $row, int $seqNo): void
+    {
+        $this->lineSeqNos[$row] = $seqNo;
+    }
+
+    /**
+     * Get the source sequence number a row is synced to.
+     */
+    public function getLineSeqNo(int $row): int
+    {
+        return $this->lineSeqNos[$row] ?? 0;
+    }
+
+    /**
      * Get all rows that have changed since the given sequence number.
      *
      * @return array<int> Row indices that have changed
@@ -735,6 +751,27 @@ class CellBuffer
             'width' => $this->width,
             'height' => $this->height,
         ];
+    }
+
+    /**
+     * Reset the buffer so an existing instance can be reused after a resize.
+     *
+     * This clears any cached hashes and previous-frame diff state because the
+     * old cell layout is no longer meaningful once dimensions change.
+     */
+    public function resetDimensions(int $width, int $height): void
+    {
+        $this->width = $width;
+        $this->height = $height;
+        $this->cells = [];
+        $this->previousCells = [];
+        $this->hasPreviousFrame = false;
+        $this->dirtyCells = [];
+        $this->lineSeqNos = [];
+        $this->rowHashes = [];
+        $this->scrollOffset = 0;
+
+        $this->initializeRows(0, $height);
     }
 
     /**

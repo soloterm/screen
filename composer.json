@@ -34,6 +34,7 @@
     },
     "scripts": {
         "test": "php bin/test",
+        "bench": "php bin/bench",
         "test:screenshots": "php bin/test --screenshots",
         "test:missing": "php bin/test --missing",
         "test:failed": "php bin/test --failed",

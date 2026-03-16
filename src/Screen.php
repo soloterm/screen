@@ -19,6 +19,7 @@ use SoloTerm\Screen\Buffers\CellBuffer;
 use SoloTerm\Screen\Buffers\PrintableBuffer;
 use SoloTerm\Screen\Buffers\Proxy;
 use Stringable;
+use WeakMap;
 
 class Screen
 {
@@ -52,7 +53,30 @@ class Screen
         '~' => '·',
     ];
 
+    protected const ANSI_DECORATION_RESETS = [
+        1 => 22,
+        2 => 22,
+        3 => 23,
+        4 => 24,
+        5 => 25,
+        7 => 27,
+        8 => 28,
+        9 => 29,
+    ];
+
     protected static ?array $ansiCodeBits = null;
+
+    protected static array $styleExtractionCache = [
+        0 => [0, null, null],
+    ];
+
+    protected static array $differentialAnsiCodesCache = [
+        0 => [],
+    ];
+
+    protected static array $differentialAnsiResetCodesCache = [
+        0 => [],
+    ];
 
     public AnsiBuffer $ansi;
 
@@ -102,10 +126,16 @@ class Screen
      */
     protected int $lastRenderedSeqNo = 0;
 
+    /**
+     * Tracks the last viewport mapping written into each reusable CellBuffer.
+     */
+    protected WeakMap $cellBufferViewportState;
+
     public function __construct(int $width, int $height)
     {
         $this->width = $width;
         $this->height = $height;
+        $this->cellBufferViewportState = new WeakMap();
 
         $this->seqNoProvider = fn() => ++$this->seqNo;
         $this->initializeBuffers();
@@ -269,10 +299,8 @@ class Screen
      */
     protected function outputDifferential(int $sinceSeqNo): string
     {
-        // Get changed rows from the printable buffer (which tracks all writes)
-        $changedRows = $this->printable->getChangedRows($sinceSeqNo);
+        $changedRows = $this->changedRowsSince($sinceSeqNo);
 
-        // Early return if nothing changed
         if (empty($changedRows) && empty($this->pendingClearedRows)) {
             return '';
         }
@@ -280,32 +308,34 @@ class Screen
         $parts = [];
         $printable = $this->printable->getBuffer();
 
-        // Only compute ANSI for changed rows
         foreach ($changedRows as $lineIndex) {
-            // Skip rows that don't exist in the buffer
-            if (!isset($printable[$lineIndex])) {
-                continue;
-            }
-
-            // Calculate visible row (1-based, accounting for scroll offset)
             $visibleRow = $lineIndex - $this->linesOffScreen + 1;
 
-            // Skip rows that are scrolled off screen
             if ($visibleRow < 1 || $visibleRow > $this->height) {
                 continue;
             }
 
-            $line = $printable[$lineIndex];
+            $line = $printable[$lineIndex] ?? [];
+            $span = $this->changedSpanForRow($lineIndex, $sinceSeqNo);
 
-            // Compute compressed ANSI only for this specific line
-            $ansiForLine = $this->compressAnsiForLine($lineIndex);
+            if ($span === null) {
+                continue;
+            }
 
-            // Position cursor at start of this line, then render
-            $parts[] = "\033[{$visibleRow};1H";
+            [$startCol, $endCol] = $span;
+            $startCol = $this->normalizeChangedColumnStart($line, $startCol);
+            $clearToEndOfLine = $startCol === 0 || $endCol >= count($line);
+            $renderEndCol = $clearToEndOfLine
+                ? (count($line) - 1)
+                : min($endCol, count($line) - 1);
+
+            $parts[] = "\033[{$visibleRow};" . ($startCol + 1) . 'H';
             $parts[] = "\033[0m";
-            $parts[] = $this->renderLine($lineIndex, $line, $ansiForLine);
-            // Clear to end of line to handle shortened content
-            $parts[] = "\033[K";
+            $parts[] = $this->renderDifferentialLine($lineIndex, $line, $startCol, $renderEndCol);
+
+            if ($clearToEndOfLine) {
+                $parts[] = "\033[K";
+            }
         }
 
         $parts[] = $this->renderPendingClearedRows();
@@ -317,68 +347,75 @@ class Screen
      * Compute compressed ANSI codes for a single line.
      * This is an optimized version of compressedAnsiBuffer() for one row.
      */
-    protected function compressAnsiForLine(int $lineIndex): array
+    protected function renderDifferentialLine(int $lineIndex, array $line, int $startCol = 0, ?int $endCol = null): string
     {
-        $line = $this->ansi->buffer[$lineIndex] ?? [];
+        $ansiLine = $this->ansi->buffer[$lineIndex] ?? [];
 
-        if (empty($line)) {
-            return [];
+        if ($line === [] || $endCol !== null && $endCol < $startCol) {
+            return '';
         }
 
-        // Reset on each line for safety (in case previous lines aren't visible)
         $previousCell = [0, null, null];
+        $lineStr = '';
+        $lineLength = count($line);
+        $lastCol = $endCol === null ? ($lineLength - 1) : min($endCol, $lineLength - 1);
 
-        return array_filter(array_map(function ($cell) use (&$previousCell) {
+        for ($col = $startCol; $col <= $lastCol; $col++) {
+            $cell = $ansiLine[$col] ?? 0;
+
             if (is_int($cell)) {
                 $cell = [$cell, null, null];
             }
 
-            $uniqueBits = $cell[0] & ~$previousCell[0];
-            $turnedOffBits = $previousCell[0] & ~$cell[0];
-
-            $resetCodes = [];
-            $turnedOffCodes = $this->ansi->ansiCodesFromBits($turnedOffBits);
-
-            foreach ($turnedOffCodes as $code) {
-                if ($code >= 30 && $code <= 39 || $code >= 90 && $code <= 97) {
-                    $resetCodes[] = 39;
-                } elseif ($code >= 40 && $code <= 49 || $code >= 100 && $code <= 107) {
-                    $resetCodes[] = 49;
-                } elseif ($code >= 1 && $code <= 9) {
-                    // Map decoration codes to their resets
-                    $decorationResets = [1 => 22, 2 => 22, 3 => 23, 4 => 24, 5 => 25, 7 => 27, 8 => 28, 9 => 29];
-                    if (isset($decorationResets[$code])) {
-                        $resetCodes[] = $decorationResets[$code];
-                    }
-                }
-            }
-
-            $uniqueCodes = $this->ansi->ansiCodesFromBits($uniqueBits);
-
-            // Extended foreground changed
-            if ($previousCell[1] !== $cell[1]) {
-                if ($previousCell[1] !== null && $cell[1] === null) {
-                    $resetCodes[] = 39;
-                } elseif ($cell[1] !== null) {
-                    $uniqueCodes[] = implode(';', [38, ...$cell[1]]);
-                }
-            }
-
-            // Extended background changed
-            if ($previousCell[2] !== $cell[2]) {
-                if ($previousCell[2] !== null && $cell[2] === null) {
-                    $resetCodes[] = 49;
-                } elseif ($cell[2] !== null) {
-                    $uniqueCodes[] = implode(';', [48, ...$cell[2]]);
-                }
-            }
-
+            $lineStr .= $this->ansiTransitionForDifferentialLine($cell, $previousCell);
+            $lineStr .= $line[$col] ?? ' ';
             $previousCell = $cell;
+        }
 
-            $allCodes = array_unique(array_merge($resetCodes, $uniqueCodes));
+        return $lineStr;
+    }
 
-            return count($allCodes) ? ("\e[" . implode(';', $allCodes) . 'm') : '';
-        }, $line));
+    /**
+     * @return array<int>
+     */
+    protected function changedRowsSince(int $sinceSeqNo): array
+    {
+        $changedRows = array_fill_keys($this->printable->getChangedRows($sinceSeqNo), true);
+
+        foreach ($this->ansi->getChangedRows($sinceSeqNo) as $row) {
+            $changedRows[$row] = true;
+        }
+
+        $rows = array_map('intval', array_keys($changedRows));
+        sort($rows);
+
+        return $rows;
+    }
+
+    /**
+     * @return array{0:int,1:int}|null
+     */
+    protected function changedSpanForRow(int $row, int $sinceSeqNo): ?array
+    {
+        $printableSpan = $this->printable->getChangedSpan($row, $sinceSeqNo);
+        $ansiSpan = $this->ansi->getChangedSpan($row, $sinceSeqNo);
+
+        if ($printableSpan !== null) {
+            return $printableSpan;
+        }
+
+        return $ansiSpan;
+    }
+
+    protected function normalizeChangedColumnStart(array $printableLine, int $startCol): int
+    {
+        $startCol = max(0, min($startCol, $this->width - 1));
+
+        while ($startCol > 0 && (($printableLine[$startCol] ?? ' ') === null)) {
+            $startCol--;
+        }
+
+        return $startCol;
     }
 
     /**
@@ -393,6 +430,84 @@ class Screen
         }
 
         return $lineStr;
+    }
+
+    /**
+     * Build the ANSI transition for a differential output cell.
+     *
+     * @param  array{0:int,1:?array,2:?array}  $cell
+     * @param  array{0:int,1:?array,2:?array}  $previousCell
+     */
+    protected function ansiTransitionForDifferentialLine(array $cell, array $previousCell): string
+    {
+        if (
+            $cell[0] === $previousCell[0]
+            && $cell[1] === $previousCell[1]
+            && $cell[2] === $previousCell[2]
+        ) {
+            return '';
+        }
+
+        $uniqueBits = $cell[0] & ~$previousCell[0];
+        $turnedOffBits = $previousCell[0] & ~$cell[0];
+
+        $resetCodes = $this->ansiResetCodesForDifferentialBits($turnedOffBits);
+        $uniqueCodes = $this->ansiCodesForDifferentialBits($uniqueBits);
+
+        if ($previousCell[1] !== $cell[1]) {
+            if ($previousCell[1] !== null && $cell[1] === null) {
+                $resetCodes[] = 39;
+            } elseif ($cell[1] !== null) {
+                $uniqueCodes[] = $this->buildDifferentialExtendedColorCode(38, $cell[1]);
+            }
+        }
+
+        if ($previousCell[2] !== $cell[2]) {
+            if ($previousCell[2] !== null && $cell[2] === null) {
+                $resetCodes[] = 49;
+            } elseif ($cell[2] !== null) {
+                $uniqueCodes[] = $this->buildDifferentialExtendedColorCode(48, $cell[2]);
+            }
+        }
+
+        $allCodes = array_unique(array_merge($resetCodes, $uniqueCodes));
+
+        return $allCodes === [] ? '' : ("\e[" . implode(';', $allCodes) . 'm');
+    }
+
+    protected function ansiCodesForDifferentialBits(int $bits): array
+    {
+        if (isset(self::$differentialAnsiCodesCache[$bits])) {
+            return self::$differentialAnsiCodesCache[$bits];
+        }
+
+        return self::$differentialAnsiCodesCache[$bits] = $this->ansi->ansiCodesFromBits($bits);
+    }
+
+    protected function ansiResetCodesForDifferentialBits(int $bits): array
+    {
+        if (isset(self::$differentialAnsiResetCodesCache[$bits])) {
+            return self::$differentialAnsiResetCodesCache[$bits];
+        }
+
+        $resetCodes = [];
+
+        foreach ($this->ansiCodesForDifferentialBits($bits) as $code) {
+            if (($code >= 30 && $code <= 39) || ($code >= 90 && $code <= 97)) {
+                $resetCodes[] = 39;
+            } elseif (($code >= 40 && $code <= 49) || ($code >= 100 && $code <= 107)) {
+                $resetCodes[] = 49;
+            } elseif ($code >= 1 && $code <= 9 && isset(self::ANSI_DECORATION_RESETS[$code])) {
+                $resetCodes[] = self::ANSI_DECORATION_RESETS[$code];
+            }
+        }
+
+        return self::$differentialAnsiResetCodesCache[$bits] = array_values(array_unique($resetCodes));
+    }
+
+    protected function buildDifferentialExtendedColorCode(int $prefix, array $color): string
+    {
+        return $prefix . ';' . implode(';', $color);
     }
 
     public function write(string $content): static
@@ -1346,41 +1461,200 @@ class Screen
     public function toCellBuffer(?CellBuffer $targetBuffer = null): CellBuffer
     {
         $buffer = $targetBuffer ?? new CellBuffer($this->width, $this->height);
-        $printable = $this->printable->getBuffer();
 
-        // Only convert the visible portion of the screen
-        for ($row = 0; $row < $this->height; $row++) {
-            $bufferRow = $row + $this->linesOffScreen;
+        $forceFullSync = false;
 
-            $printableLine = $printable[$bufferRow] ?? [];
-            $ansiLine = $this->ansi->buffer[$bufferRow] ?? [];
-
-            for ($col = 0; $col < $this->width; $col++) {
-                $char = $printableLine[$col] ?? ' ';
-
-                // Get raw ANSI cell data
-                $ansiCell = $ansiLine[$col] ?? 0;
-
-                // Parse the ANSI cell
-                if (is_int($ansiCell)) {
-                    $bits = $ansiCell;
-                    $extFg = null;
-                    $extBg = null;
-                } else {
-                    $bits = $ansiCell[0] ?? 0;
-                    $extFg = $ansiCell[1] ?? null;
-                    $extBg = $ansiCell[2] ?? null;
-                }
-
-                // Convert to Cell - extract style, fg, bg from the bitmask
-                [$style, $fg, $bg] = $this->extractStyleFromBits($bits);
-
-                $cell = new Cell($char, $style, $fg, $bg, $extFg, $extBg);
-                $buffer->setCell($row, $col, $cell);
-            }
+        if ($buffer->getWidth() !== $this->width || $buffer->getHeight() !== $this->height) {
+            $buffer->resetDimensions($this->width, $this->height);
+            $forceFullSync = true;
         }
 
+        $viewportState = [
+            'linesOffScreen' => $this->linesOffScreen,
+            'width' => $this->width,
+            'height' => $this->height,
+            'printableId' => spl_object_id($this->printable),
+            'ansiId' => spl_object_id($this->ansi),
+        ];
+
+        if (!$forceFullSync) {
+            $previousViewportState = isset($this->cellBufferViewportState[$buffer])
+                ? $this->cellBufferViewportState[$buffer]
+                : null;
+
+            $forceFullSync = $previousViewportState !== $viewportState;
+        }
+
+        $currentSeqNo = $this->getSeqNo();
+        $printable = $this->printable->getBuffer();
+
+        for ($row = 0; $row < $this->height; $row++) {
+            $sourceRow = $row + $this->linesOffScreen;
+            $startCol = 0;
+            $endCol = $this->width - 1;
+
+            if (!$forceFullSync) {
+                $rowSeqNo = $buffer->getLineSeqNo($row);
+                $span = $this->changedSpanForRow($sourceRow, $rowSeqNo);
+
+                if ($span === null) {
+                    continue;
+                }
+
+                $printableLine = $printable[$sourceRow] ?? [];
+                $startCol = $this->normalizeChangedColumnStart($printableLine, $span[0]);
+                $endCol = min($this->width - 1, $span[1]);
+            } else {
+                $printableLine = $printable[$sourceRow] ?? [];
+            }
+
+            $this->materializeCellBufferRow(
+                buffer: $buffer,
+                targetRow: $row,
+                printableLine: $printableLine,
+                ansiLine: $this->ansi->buffer[$sourceRow] ?? [],
+                startCol: $startCol,
+                endCol: $endCol,
+            );
+
+            $buffer->setLineSeqNo($row, $currentSeqNo);
+        }
+
+        $this->cellBufferViewportState[$buffer] = $viewportState;
+
         return $buffer;
+    }
+
+    /**
+     * Materialize a single visible row into the target CellBuffer.
+     */
+    protected function materializeCellBufferRow(
+        CellBuffer $buffer,
+        int $targetRow,
+        array $printableLine,
+        array $ansiLine,
+        int $startCol = 0,
+        ?int $endCol = null
+    ): void {
+        $lastCol = $endCol === null ? ($this->width - 1) : min($endCol, $this->width - 1);
+
+        for ($col = $startCol; $col <= $lastCol; $col++) {
+            $char = array_key_exists($col, $printableLine)
+                ? $printableLine[$col]
+                : ' ';
+            $existing = $buffer->getCell($targetRow, $col);
+            $ansiCell = $ansiLine[$col] ?? 0;
+
+            // Blank/default cells are the common case, so avoid style decoding and
+            // object allocation entirely when the current cell already matches.
+            if (is_int($ansiCell) && $ansiCell === 0) {
+                if ($char === null) {
+                    if ($existing->isContinuation() && !$existing->hasStyle()) {
+                        continue;
+                    }
+
+                    $cell = Cell::continuation();
+                } else {
+                    if ($existing->char === $char && !$existing->hasStyle()) {
+                        continue;
+                    }
+
+                    $cell = new Cell($char);
+                }
+
+                $buffer->setCell($targetRow, $col, $cell);
+
+                continue;
+            }
+
+            if (is_int($ansiCell)) {
+                $bits = $ansiCell;
+                $extFg = null;
+                $extBg = null;
+            } else {
+                $bits = $ansiCell[0] ?? 0;
+                $extFg = $ansiCell[1] ?? null;
+                $extBg = $ansiCell[2] ?? null;
+            }
+
+            [$style, $fg, $bg] = $this->extractStyleFromBits($bits);
+
+            if (
+                $char !== null
+                && $existing->char === $char
+                && $existing->style === $style
+                && $existing->fg === $fg
+                && $existing->bg === $bg
+                && $existing->extFg === $extFg
+                && $existing->extBg === $extBg
+            ) {
+                continue;
+            }
+
+            if (
+                $char === null
+                && $existing->isContinuation()
+                && $existing->style === $style
+                && $existing->fg === $fg
+                && $existing->bg === $bg
+                && $existing->extFg === $extFg
+                && $existing->extBg === $extBg
+            ) {
+                continue;
+            }
+
+            $buffer->setCell(
+                $targetRow,
+                $col,
+                $this->cellFromVisibleBuffers(
+                    $char,
+                    $ansiCell,
+                    $style,
+                    $fg,
+                    $bg,
+                    $extFg,
+                    $extBg,
+                )
+            );
+        }
+    }
+
+    protected function cellFromVisibleBuffers(
+        ?string $char,
+        int|array $ansiCell,
+        ?int $style = null,
+        ?int $fg = null,
+        ?int $bg = null,
+        ?array $extFg = null,
+        ?array $extBg = null,
+    ): Cell
+    {
+        if ($style === null) {
+            if (is_int($ansiCell)) {
+                $bits = $ansiCell;
+                $extFg = null;
+                $extBg = null;
+            } else {
+                $bits = $ansiCell[0] ?? 0;
+                $extFg = $ansiCell[1] ?? null;
+                $extBg = $ansiCell[2] ?? null;
+            }
+
+            [$style, $fg, $bg] = $this->extractStyleFromBits($bits);
+        }
+
+        if ($char === null) {
+            $cell = Cell::continuation();
+            $cell->style = $style;
+            $cell->fg = $fg;
+            $cell->bg = $bg;
+            $cell->extFg = $extFg;
+            $cell->extBg = $extBg;
+
+            return $cell;
+        }
+
+        return new Cell($char, $style, $fg, $bg, $extFg, $extBg);
     }
 
     /**
@@ -1391,6 +1665,10 @@ class Screen
      */
     protected function extractStyleFromBits(int $bits): array
     {
+        if (isset(self::$styleExtractionCache[$bits])) {
+            return self::$styleExtractionCache[$bits];
+        }
+
         $style = 0;
         $fg = null;
         $bg = null;
@@ -1419,7 +1697,7 @@ class Screen
             }
         }
 
-        return [$style, $fg, $bg];
+        return self::$styleExtractionCache[$bits] = [$style, $fg, $bg];
     }
 
     protected static function ansiCodeBits(): array

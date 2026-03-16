@@ -34,6 +34,29 @@ class Buffer implements ArrayAccess
      */
     protected $seqNoProvider = null;
 
+    /**
+     * Conservative dirty column spans for each row.
+     *
+     * @var array<int, array{0:int,1:int}>
+     */
+    protected array $lineDirtySpans = [];
+
+    /**
+     * Whether this buffer should keep exact dirty-span history by sequence.
+     */
+    protected bool $trackDirtySpanHistory = false;
+
+    /**
+     * Per-row dirty span history keyed by row.
+     *
+     * Entries are stored as [seqNo, startCol, endCol]. Older entries are
+     * conservatively compacted so getChangedSpan() can still answer "since
+     * seq" queries without keeping an unbounded exact log.
+     *
+     * @var array<int, list<array{0:int,1:int,2:int}>>
+     */
+    protected array $lineDirtySpanHistory = [];
+
     public function __construct(public int $max = 5000)
     {
         if (method_exists($this, 'initialize')) {
@@ -54,11 +77,22 @@ class Buffer implements ArrayAccess
     /**
      * Mark a line as dirty (modified) with the current sequence number.
      */
-    public function markLineDirty(int $row): void
+    public function markLineDirty(int $row, ?int $startCol = null, ?int $endCol = null): void
     {
-        if ($this->seqNoProvider !== null) {
-            $this->lineSeqNos[$row] = ($this->seqNoProvider)();
+        if ($this->seqNoProvider === null) {
+            return;
         }
+
+        $seqNo = ($this->seqNoProvider)();
+        $this->lineSeqNos[$row] = $seqNo;
+
+        if ($this->trackDirtySpanHistory) {
+            $this->recordDirtySpanHistory($row, $seqNo, $startCol, $endCol);
+
+            return;
+        }
+
+        $this->mergeDirtySpan($row, $startCol, $endCol);
     }
 
     /**
@@ -87,6 +121,44 @@ class Buffer implements ArrayAccess
         sort($changed);
 
         return $changed;
+    }
+
+    /**
+     * Get the dirty column span for a row if it changed.
+     *
+     * @return array{0:int,1:int}|null
+     */
+    public function getChangedSpan(int $row, int $sinceSeqNo): ?array
+    {
+        if (!$this->lineChangedSince($row, $sinceSeqNo)) {
+            return null;
+        }
+
+        if (!isset($this->lineDirtySpanHistory[$row])) {
+            return $this->lineDirtySpans[$row] ?? [0, PHP_INT_MAX];
+        }
+
+        if (!$this->trackDirtySpanHistory) {
+            return $this->lineDirtySpans[$row] ?? [0, PHP_INT_MAX];
+        }
+
+        $startCol = PHP_INT_MAX;
+        $endCol = -1;
+
+        foreach ($this->lineDirtySpanHistory[$row] as [$seqNo, $entryStart, $entryEnd]) {
+            if ($seqNo <= $sinceSeqNo) {
+                continue;
+            }
+
+            $startCol = min($startCol, $entryStart);
+            $endCol = max($endCol, $entryEnd);
+        }
+
+        if ($endCol === -1) {
+            return [0, PHP_INT_MAX];
+        }
+
+        return [$startCol, $endCol];
     }
 
     /**
@@ -134,17 +206,18 @@ class Buffer implements ArrayAccess
                 // Clearing an entire line. Benchmarked slightly
                 // faster to just replace the entire row.
                 $this->buffer[$row] = [];
+                $this->markLineDirty($row);
             } elseif ($cols[0] > 0 && $cols[1] === $length) {
                 // Clearing from cols[0] to the end of the line.
                 // Chop off the end of the array.
                 $this->buffer[$row] = array_slice($line, 0, $cols[0]);
+                $this->markLineDirty($row, $cols[0], $length);
             } else {
                 // Clearing the middle of a row. Fill with the replacement value.
                 $this->fill($this->valueForClearing, $row, $cols[0], $cols[1]);
-            }
 
-            // Mark this row as dirty
-            $this->markLineDirty($row);
+                continue;
+            }
         }
     }
 
@@ -158,14 +231,19 @@ class Buffer implements ArrayAccess
     public function fill(mixed $value, int $row, int $startCol, int $endCol)
     {
         $this->expand($row);
+        $line = &$this->buffer[$row];
 
-        $line = $this->buffer[$row];
+        if ($startCol <= $endCol) {
+            for ($col = $startCol; $col <= $endCol; $col++) {
+                $line[$col] = $value;
+            }
+        } else {
+            for ($col = $startCol; $col >= $endCol; $col--) {
+                $line[$col] = $value;
+            }
+        }
 
-        $this->buffer[$row] = array_replace(
-            $line, array_fill_keys(range($startCol, $endCol), $value)
-        );
-
-        $this->markLineDirty($row);
+        $this->markLineDirty($row, $startCol, $endCol);
         $this->trim();
     }
 
@@ -214,6 +292,73 @@ class Buffer implements ArrayAccess
 
             $this->buffer = array_replace($this->buffer, $nulls);
         }
+    }
+
+    protected function recordDirtySpanHistory(int $row, int $seqNo, ?int $startCol, ?int $endCol): void
+    {
+        if ($startCol === null || $endCol === null) {
+            $this->lineDirtySpanHistory[$row] = [[$seqNo, 0, PHP_INT_MAX]];
+            $this->lineDirtySpans[$row] = [0, PHP_INT_MAX];
+
+            return;
+        }
+
+        if ($endCol < $startCol) {
+            [$startCol, $endCol] = [$endCol, $startCol];
+        }
+
+        $history = $this->lineDirtySpanHistory[$row] ?? [];
+        $history[] = [$seqNo, $startCol, $endCol];
+        $this->mergeDirtySpan($row, $startCol, $endCol);
+
+        while (count($history) > 6) {
+            $offset = isset($history[0]) && $history[0][1] === 0 && $history[0][2] === PHP_INT_MAX
+                ? 1
+                : 0;
+
+            if (!isset($history[$offset + 1])) {
+                break;
+            }
+
+            [$firstSeqNo, $firstStart, $firstEnd] = $history[$offset];
+            [$secondSeqNo, $secondStart, $secondEnd] = $history[$offset + 1];
+
+            array_splice($history, $offset, 2, [[
+                max($firstSeqNo, $secondSeqNo),
+                min($firstStart, $secondStart),
+                max($firstEnd, $secondEnd),
+            ]]);
+        }
+
+        $this->lineDirtySpanHistory[$row] = $history;
+    }
+
+    protected function mergeDirtySpan(int $row, ?int $startCol, ?int $endCol): void
+    {
+        if ($startCol === null || $endCol === null) {
+            $this->lineDirtySpans[$row] = [0, PHP_INT_MAX];
+
+            return;
+        }
+
+        if ($endCol < $startCol) {
+            [$startCol, $endCol] = [$endCol, $startCol];
+        }
+
+        if (!isset($this->lineDirtySpans[$row])) {
+            $this->lineDirtySpans[$row] = [$startCol, $endCol];
+
+            return;
+        }
+
+        if ($this->lineDirtySpans[$row][1] === PHP_INT_MAX) {
+            return;
+        }
+
+        $this->lineDirtySpans[$row] = [
+            min($this->lineDirtySpans[$row][0], $startCol),
+            max($this->lineDirtySpans[$row][1], $endCol),
+        ];
     }
 
     protected function normalizeClearColumns(int $currentRow, int $startRow, int $startCol, int $endRow, int $endCol)

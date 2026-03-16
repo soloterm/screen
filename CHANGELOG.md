@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Benchmark harness** - Added `bin/bench` plus `composer bench` for lightweight measurement of `toCellBuffer()`, differential output, styled writes, scroll, erase, and diff rendering paths
+- **Regression coverage for incremental rendering** - Added focused tests for visible-row span sync, partial differential rendering, wide-character continuation invalidation, and printable dirty-span tracking
+
+### Changed
+
+- **Incremental visible-frame materialization** - `Screen::toCellBuffer()` now reuses target `CellBuffer` instances and rematerializes only changed visible spans, while still forcing full sync on viewport remaps and resize
+- **Span-aware differential output** - `Screen::output($sinceSeqNo)` now renders only the changed segment of a line when safe and caches repeated ANSI transition work for style-heavy updates
+- **Lower-cost buffer fills** - `Buffer::fill()` now writes spans imperatively instead of rebuilding temporary arrays on every fill
+- **Faster printable writes** - `PrintableBuffer::writeString()` now has an ASCII fast path and records exact touched spans for incremental consumers
+
+### Fixed
+
+- **Wide-character invalidation correctness** - Overwriting a continuation cell now invalidates the lead cell span so incremental sync and differential output preserve wide-character behavior
+- **Incremental ANSI correctness** - Partial style changes, continuation cells, clears, and viewport movement now invalidate the correct visible regions during reusable frame sync
+
 ## [1.1.2] - 2026-03-16
 
 ### Added

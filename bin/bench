@@ -1,0 +1,502 @@
+#!/usr/bin/env php
+<?php
+
+require __DIR__ . '/../vendor/autoload.php';
+
+use SoloTerm\Screen\Buffers\AnsiBuffer;
+use SoloTerm\Screen\Buffers\CellBuffer;
+use SoloTerm\Screen\Cell;
+use SoloTerm\Screen\Screen;
+
+/**
+ * Lightweight local benchmark harness for the hottest Screen paths.
+ *
+ * This is intentionally simple:
+ * - Uses hrtime() for wall-clock timing
+ * - Runs warmup iterations before measuring
+ * - Avoids external dependencies or fixture generation
+ *
+ * Usage:
+ *   php bin/bench
+ *   php bin/bench --list
+ *   php bin/bench --iterations=2000 --warmup=200 to-cell-buffer-unchanged
+ */
+
+$options = parseArguments($argv);
+$scenarios = benchmarkScenarios();
+
+if ($options['list']) {
+    fwrite(STDOUT, "Available scenarios:\n");
+
+    foreach ($scenarios as $name => $scenario) {
+        fwrite(STDOUT, sprintf("  %-28s %s\n", $name, $scenario['description']));
+    }
+
+    exit(0);
+}
+
+$selectedNames = $options['scenarios'] === []
+    ? array_keys($scenarios)
+    : $options['scenarios'];
+
+$selected = [];
+
+foreach ($selectedNames as $name) {
+    if (!isset($scenarios[$name])) {
+        fwrite(STDERR, "Unknown benchmark scenario: {$name}\n");
+        fwrite(STDERR, "Run `php bin/bench --list` to see available scenarios.\n");
+
+        exit(1);
+    }
+
+    $selected[$name] = $scenarios[$name];
+}
+
+fwrite(STDOUT, sprintf(
+    "Running %d benchmark%s with %d warmup / %d measured iterations\n\n",
+    count($selected),
+    count($selected) === 1 ? '' : 's',
+    $options['warmup'],
+    $options['iterations']
+));
+
+$results = [];
+
+foreach ($selected as $name => $scenario) {
+    gc_collect_cycles();
+
+    $state = $scenario['setup']();
+
+    for ($i = 0; $i < $options['warmup']; $i++) {
+        $scenario['run']($state, $i);
+    }
+
+    gc_collect_cycles();
+
+    $start = hrtime(true);
+
+    for ($i = 0; $i < $options['iterations']; $i++) {
+        $scenario['run']($state, $i);
+    }
+
+    $elapsedNs = hrtime(true) - $start;
+    $elapsedMs = $elapsedNs / 1_000_000;
+    $avgUs = $elapsedNs / max(1, $options['iterations']) / 1_000;
+    $opsPerSec = $elapsedNs > 0
+        ? ($options['iterations'] * 1_000_000_000) / $elapsedNs
+        : 0.0;
+
+    $results[] = [
+        'name' => $name,
+        'description' => $scenario['description'],
+        'elapsed_ms' => $elapsedMs,
+        'avg_us' => $avgUs,
+        'ops_per_sec' => $opsPerSec,
+    ];
+}
+
+$nameWidth = max(array_map(
+    static fn(array $result) => strlen($result['name']),
+    $results
+));
+
+fwrite(STDOUT, sprintf(
+    "%-{$nameWidth}s  %12s  %12s  %12s\n",
+    'Scenario',
+    'Total ms',
+    'Avg us/op',
+    'Ops/sec'
+));
+
+fwrite(STDOUT, str_repeat('-', $nameWidth + 40) . "\n");
+
+foreach ($results as $result) {
+    fwrite(STDOUT, sprintf(
+        "%-{$nameWidth}s  %12.3f  %12.3f  %12.1f\n",
+        $result['name'],
+        $result['elapsed_ms'],
+        $result['avg_us'],
+        $result['ops_per_sec'],
+    ));
+}
+
+fwrite(STDOUT, "\n");
+
+foreach ($results as $result) {
+    fwrite(STDOUT, sprintf(
+        "%s: %s\n",
+        $result['name'],
+        $result['description']
+    ));
+}
+
+/**
+ * @return array{iterations:int,warmup:int,list:bool,scenarios:list<string>}
+ */
+function parseArguments(array $argv): array
+{
+    $iterations = 1000;
+    $warmup = 100;
+    $list = false;
+    $scenarios = [];
+
+    foreach (array_slice($argv, 1) as $arg) {
+        if ($arg === '--list') {
+            $list = true;
+
+            continue;
+        }
+
+        if (str_starts_with($arg, '--iterations=')) {
+            $iterations = max(1, (int) substr($arg, strlen('--iterations=')));
+
+            continue;
+        }
+
+        if (str_starts_with($arg, '--warmup=')) {
+            $warmup = max(0, (int) substr($arg, strlen('--warmup=')));
+
+            continue;
+        }
+
+        $scenarios[] = $arg;
+    }
+
+    return [
+        'iterations' => $iterations,
+        'warmup' => $warmup,
+        'list' => $list,
+        'scenarios' => $scenarios,
+    ];
+}
+
+function benchmarkScenarios(): array
+{
+    return [
+        'to-cell-buffer-full-sync' => [
+            'description' => 'Materialize a prefilled visible frame into a fresh CellBuffer.',
+            'setup' => function (): array {
+                $screen = seededScreen();
+
+                return ['screen' => $screen];
+            },
+            'run' => function (array &$state): void {
+                $state['screen']->toCellBuffer();
+            },
+        ],
+        'to-cell-buffer-unchanged' => [
+            'description' => 'Reuse a scratch CellBuffer when the visible frame is unchanged.',
+            'setup' => function (): array {
+                $screen = seededScreen();
+                $buffer = new CellBuffer($screen->width, $screen->height);
+                $screen->toCellBuffer($buffer);
+
+                return ['screen' => $screen, 'buffer' => $buffer];
+            },
+            'run' => function (array &$state): void {
+                $state['screen']->toCellBuffer($state['buffer']);
+            },
+        ],
+        'to-cell-buffer-partial-row' => [
+            'description' => 'Apply a small visible row edit, then sync into a reused CellBuffer.',
+            'setup' => function (): array {
+                $screen = seededScreen();
+                $buffer = new CellBuffer($screen->width, $screen->height);
+                $screen->toCellBuffer($buffer);
+
+                return [
+                    'screen' => $screen,
+                    'buffer' => $buffer,
+                    'toggle' => false,
+                ];
+            },
+            'run' => function (array &$state): void {
+                $state['toggle'] = !$state['toggle'];
+                $text = $state['toggle'] ? "\e[12;18HALPHA\e[0m" : "\e[12;18HOMEGA\e[0m";
+
+                $state['screen']->write($text);
+                $state['screen']->toCellBuffer($state['buffer']);
+            },
+        ],
+        'write-large-styled-chunk' => [
+            'description' => 'Rewrite a long styled line in place to exercise ANSI parsing and buffer writes.',
+            'setup' => function (): array {
+                return [
+                    'screen' => new Screen(120, 40),
+                    'chunkA' => rewriteChunk('A'),
+                    'chunkB' => rewriteChunk('B'),
+                    'toggle' => false,
+                ];
+            },
+            'run' => function (array &$state): void {
+                $state['toggle'] = !$state['toggle'];
+
+                $state['screen']->write($state['toggle'] ? $state['chunkA'] : $state['chunkB']);
+            },
+        ],
+        'write-wide-char-heavy' => [
+            'description' => 'Rewrite a line with many wide graphemes and emoji clusters.',
+            'setup' => function (): array {
+                return [
+                    'screen' => new Screen(120, 40),
+                    'chunkA' => wideChunk('A'),
+                    'chunkB' => wideChunk('B'),
+                    'toggle' => false,
+                ];
+            },
+            'run' => function (array &$state): void {
+                $state['toggle'] = !$state['toggle'];
+
+                $state['screen']->write($state['toggle'] ? $state['chunkA'] : $state['chunkB']);
+            },
+        ],
+        'scroll-append-full-screen' => [
+            'description' => 'Append lines into a full viewport so each iteration triggers scroll handling.',
+            'setup' => function (): array {
+                $screen = seededScreen(lineCount: 40);
+
+                return [
+                    'screen' => $screen,
+                    'counter' => 40,
+                ];
+            },
+            'run' => function (array &$state): void {
+                $state['counter']++;
+                $state['screen']->write(sprintf(
+                    "\n\e[38;5;%dmappend-%03d 文🙂\e[0m",
+                    16 + ($state['counter'] % 216),
+                    $state['counter'],
+                ));
+            },
+        ],
+        'erase-in-line-roundtrip' => [
+            'description' => 'Alternate between erasing to end-of-line and restoring content on one visible row.',
+            'setup' => function (): array {
+                $screen = seededScreen();
+
+                return [
+                    'screen' => $screen,
+                    'restore' => eraseRestoreChunk('A'),
+                    'toggle' => false,
+                ];
+            },
+            'run' => function (array &$state): void {
+                $state['toggle'] = !$state['toggle'];
+
+                if ($state['toggle']) {
+                    $state['screen']->write("\e[12;18H\e[0K");
+
+                    return;
+                }
+
+                $state['screen']->write($state['restore']);
+            },
+        ],
+        'clear-screen-region-roundtrip' => [
+            'description' => 'Alternate between clearing a screen region and restoring text into it.',
+            'setup' => function (): array {
+                $screen = seededScreen();
+
+                return [
+                    'screen' => $screen,
+                    'restore' => regionRestoreChunk(),
+                    'toggle' => false,
+                ];
+            },
+            'run' => function (array &$state): void {
+                $state['toggle'] = !$state['toggle'];
+
+                if ($state['toggle']) {
+                    $state['screen']->write("\e[10;10H\e[0J");
+
+                    return;
+                }
+
+                $state['screen']->write($state['restore']);
+            },
+        ],
+        'output-differential-partial-row' => [
+            'description' => 'Apply a small visible row edit, then render only the differential output.',
+            'setup' => function (): array {
+                $screen = seededScreen();
+                $screen->output();
+
+                return [
+                    'screen' => $screen,
+                    'toggle' => false,
+                    'since' => $screen->getLastRenderedSeqNo(),
+                ];
+            },
+            'run' => function (array &$state): void {
+                $state['toggle'] = !$state['toggle'];
+                $text = $state['toggle'] ? "\e[12;18HALPHA\e[0m" : "\e[12;18HOMEGA\e[0m";
+
+                $state['screen']->write($text);
+                $state['screen']->output($state['since']);
+                $state['since'] = $state['screen']->getLastRenderedSeqNo();
+            },
+        ],
+        'output-differential-many-style-transitions' => [
+            'description' => 'Render differential output for a row with many style transitions.',
+            'setup' => function (): array {
+                $screen = seededScreen();
+                $screen->output();
+
+                return [
+                    'screen' => $screen,
+                    'chunkA' => differentialStyleChunk('A'),
+                    'chunkB' => differentialStyleChunk('B'),
+                    'toggle' => false,
+                    'since' => $screen->getLastRenderedSeqNo(),
+                ];
+            },
+            'run' => function (array &$state): void {
+                $state['toggle'] = !$state['toggle'];
+                $state['screen']->write($state['toggle'] ? $state['chunkA'] : $state['chunkB']);
+                $state['screen']->output($state['since']);
+                $state['since'] = $state['screen']->getLastRenderedSeqNo();
+            },
+        ],
+        'cell-buffer-render-diff-optimized' => [
+            'description' => 'Render a changed CellBuffer frame through renderDiffOptimized().',
+            'setup' => function (): array {
+                $buffer = seededCellBuffer();
+                $buffer->swapBuffers();
+
+                return [
+                    'buffer' => $buffer,
+                    'toggle' => false,
+                ];
+            },
+            'run' => function (array &$state): void {
+                $state['toggle'] = !$state['toggle'];
+                applyCellBufferDelta($state['buffer'], $state['toggle']);
+                $state['buffer']->renderDiffOptimized();
+                $state['buffer']->swapBuffers();
+            },
+        ],
+        'ansi-fill-span' => [
+            'description' => 'Fill an ANSI span on an existing row to isolate Buffer::fill() cost.',
+            'setup' => function (): array {
+                $buffer = new AnsiBuffer;
+                $buffer->buffer[12] = array_fill(0, 120, 0);
+                $buffer->addAnsiCodes(1, 38, 5, 196, 48, 5, 236);
+
+                return ['buffer' => $buffer];
+            },
+            'run' => function (array &$state): void {
+                $state['buffer']->fillBufferWithActiveFlags(12, 8, 95);
+            },
+        ],
+    ];
+}
+
+function seededScreen(int $width = 120, int $height = 40, int $lineCount = 120): Screen
+{
+    $screen = new Screen($width, $height);
+
+    for ($i = 0; $i < $lineCount; $i++) {
+        $color = 16 + ($i % 216);
+        $bg = 16 + (($i * 7) % 216);
+        $line = sprintf(
+            "\e[1;38;5;%d;48;5;%dmRow %03d 文🙂 segment-%02d lorem ipsum dolor sit amet 0123456789\e[0m",
+            $color,
+            $bg,
+            $i,
+            $i % 10
+        );
+
+        if ($i < $lineCount - 1) {
+            $line .= "\n";
+        }
+
+        $screen->write($line);
+    }
+
+    return $screen;
+}
+
+function rewriteChunk(string $suffix): string
+{
+    return implode('', [
+        "\e[1;1H",
+        "\e[1;38;5;196mHEADER-{$suffix}\e[0m ",
+        "\e[3mwide文🙂mix\e[0m ",
+        "\e[38;2;120;200;255mstatus-{$suffix}-0123456789abcdefghijklmnopqrstuvwxyz\e[0m ",
+        "\e[48;5;236;38;5;46mfooter-{$suffix}\e[0m",
+    ]);
+}
+
+function wideChunk(string $suffix): string
+{
+    return implode('', [
+        "\e[4;1H",
+        "文🙂家族👨‍👩‍👧‍👦かなカナ漢字{$suffix} ",
+        "🚀✨🔥🧪 mixed-width {$suffix} ",
+        "👍🏽 café résumé naïve {$suffix}",
+    ]);
+}
+
+function eraseRestoreChunk(string $suffix): string
+{
+    return implode('', [
+        "\e[12;18H",
+        "\e[1;38;5;81mrestore-{$suffix}\e[0m ",
+        "\e[48;5;236;38;5;46msegment-{$suffix}\e[0m ",
+        "tail-0123456789",
+    ]);
+}
+
+function regionRestoreChunk(): string
+{
+    return implode('', [
+        "\e[10;10H\e[38;5;45mregion-a lorem ipsum dolor sit amet\e[0m",
+        "\e[11;10H\e[38;5;118mregion-b 文🙂 content row two\e[0m",
+        "\e[12;10H\e[38;5;214mregion-c 0123456789abcdefghij\e[0m",
+    ]);
+}
+
+function differentialStyleChunk(string $suffix): string
+{
+    return implode('', [
+        "\e[12;5H",
+        "\e[1;31mAA{$suffix}\e[0m",
+        "\e[3;32mBB{$suffix}\e[0m",
+        "\e[4;38;5;196mCC{$suffix}\e[0m",
+        "\e[38;2;120;200;255mDD{$suffix}\e[0m",
+        "\e[48;5;236;38;5;220mEE{$suffix}\e[0m",
+        "\e[9;95mFF{$suffix}\e[0m",
+        "\e[7;38;5;51mGG{$suffix}\e[0m",
+    ]);
+}
+
+function seededCellBuffer(int $width = 120, int $height = 40): CellBuffer
+{
+    $buffer = new CellBuffer($width, $height);
+
+    for ($row = 0; $row < $height; $row++) {
+        for ($col = 0; $col < $width; $col += 12) {
+            $char = chr(65 + (($row + $col) % 26));
+            $buffer->setCell($row, $col, new Cell($char));
+        }
+    }
+
+    return $buffer;
+}
+
+function applyCellBufferDelta(CellBuffer $buffer, bool $toggle): void
+{
+    $continuation = Cell::continuation();
+
+    $cells = [
+        [2, 10, new Cell($toggle ? 'X' : 'Y', 1, 31, null, null, null)],
+        [5, 20, new Cell($toggle ? '文' : '語', 0, null, null, null, null)],
+        [5, 21, $continuation],
+        [11, 30, new Cell($toggle ? 'Q' : 'R', 0, null, null, [5, 196], null)],
+        [14, 40, new Cell($toggle ? 'S' : 'T', 0, null, null, null, [5, 236])],
+    ];
+
+    foreach ($cells as [$row, $col, $cell]) {
+        $buffer->setCell($row, $col, $cell);
+    }
+}

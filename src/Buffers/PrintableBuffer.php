@@ -11,6 +11,8 @@ class PrintableBuffer extends Buffer
 
     protected mixed $valueForClearing = ' ';
 
+    protected bool $trackDirtySpanHistory = true;
+
     public function setWidth(int $width): static
     {
         $this->width = $width;
@@ -86,87 +88,188 @@ class PrintableBuffer extends Buffer
      */
     public function writeString(int $row, int $col, string $text): array
     {
-        $units = $this->splitPrintableUnits($text);
-
-        $currentCol = $col;
-        $advanceCursor = 0;
-        $totalUnits = count($units);
-
-        // Ensure that the row is not sparse.
-        // If the row already exists, fill any missing indices before the starting column with a space.
-        // Otherwise, initialize the row and fill indices 0 through $col-1 with spaces.
         if (!isset($this->buffer[$row])) {
             $this->buffer[$row] = [];
         }
 
+        $line = &$this->buffer[$row];
+        $dirtyStart = null;
+        $dirtyEnd = null;
+
+        $this->fillSparsePrefix($line, $col, $dirtyStart, $dirtyEnd);
+        $this->clearOverwrittenWideCharacter($line, $col, $dirtyStart, $dirtyEnd);
+
+        if (strlen($text) === mb_strlen($text)) {
+            [$advanceCursor, $remainder] = $this->writeAsciiString($line, $col, $text, $dirtyStart, $dirtyEnd);
+        } else {
+            [$advanceCursor, $remainder] = $this->writeMultibyteString($line, $col, $text, $dirtyStart, $dirtyEnd);
+        }
+
+        if ($dirtyStart !== null && $dirtyEnd !== null) {
+            $this->markLineDirty($row, $dirtyStart, $dirtyEnd);
+        }
+
+        return [$advanceCursor, $remainder];
+    }
+
+    protected function fillSparsePrefix(array &$line, int $col, ?int &$dirtyStart, ?int &$dirtyEnd): void
+    {
+        $lineCount = count($line);
+
+        if ($lineCount < $col) {
+            for ($i = $lineCount; $i < $col; $i++) {
+                $line[$i] = ' ';
+            }
+
+            $this->touchDirtySpan($dirtyStart, $dirtyEnd, $lineCount, $col - 1);
+
+            return;
+        }
+
         for ($i = 0; $i < $col; $i++) {
-            if (!array_key_exists($i, $this->buffer[$row])) {
-                $this->buffer[$row][$i] = ' ';
+            if (!array_key_exists($i, $line)) {
+                $line[$i] = ' ';
+                $this->touchDirtySpan($dirtyStart, $dirtyEnd, $i, $i);
             }
         }
+    }
 
-        // Make sure we don't splice a wide character.
-        if (array_key_exists($col, $this->buffer[$row]) && $this->buffer[$row][$col] === null) {
-            for ($i = $col; $i >= 0; $i--) {
-                // Replace null values with a space.
-                if (!isset($this->buffer[$row][$i]) || $this->buffer[$row][$i] === null) {
-                    $this->buffer[$row][$i] = ' ';
-                } else {
-                    // Also replace the first non-null value with a space, then exit.
-                    $this->buffer[$row][$i] = ' ';
-                    break;
-                }
-            }
+    protected function clearOverwrittenWideCharacter(
+        array &$line,
+        int $col,
+        ?int &$dirtyStart,
+        ?int &$dirtyEnd
+    ): void {
+        if (!array_key_exists($col, $line) || $line[$col] !== null) {
+            return;
         }
 
-        for ($i = 0; $i < $totalUnits; $i++) {
-            $unit = $units[$i];
+        $spanStart = $col;
 
-            // Check if the unit is a tab character.
-            if ($unit === "\t") {
-                // Calculate tab width as the number of spaces needed to reach the next tab stop.
-                $unitWidth = 8 - ($currentCol % 8);
+        for ($i = $col; $i >= 0; $i--) {
+            if (!isset($line[$i]) || $line[$i] === null) {
+                $line[$i] = ' ';
+                $spanStart = $i;
             } else {
-                $unitWidth = Grapheme::wcwidth($unit);
-            }
+                $line[$i] = ' ';
+                $spanStart = $i;
 
-            // If adding this unit would overflow the available width, break out.
+                break;
+            }
+        }
+
+        $this->touchDirtySpan($dirtyStart, $dirtyEnd, $spanStart, $col);
+    }
+
+    /**
+     * @return array{int, string}
+     */
+    protected function writeAsciiString(
+        array &$line,
+        int $col,
+        string $text,
+        ?int &$dirtyStart,
+        ?int &$dirtyEnd
+    ): array {
+        $currentCol = $col;
+        $advanceCursor = 0;
+        $length = strlen($text);
+        $offset = 0;
+
+        for ($offset = 0; $offset < $length; $offset++) {
+            $unit = $text[$offset];
+            $unitWidth = $unit === "\t" ? (8 - ($currentCol % 8)) : 1;
+
             if ($currentCol + $unitWidth > $this->width) {
                 break;
             }
 
-            // Write the unit into the first cell.
-            $this->buffer[$row][$currentCol] = $unit;
+            $line[$currentCol] = $unit;
+            $this->touchDirtySpan($dirtyStart, $dirtyEnd, $currentCol, $currentCol + $unitWidth - 1);
 
-            // Fill any additional columns that the unit occupies with PHP null.
+            for ($j = 1; $j < $unitWidth; $j++) {
+                $line[$currentCol + $j] = null;
+            }
+
+            $currentCol += $unitWidth;
+            $this->clearTrailingContinuations($line, $currentCol, $dirtyStart, $dirtyEnd);
+            $advanceCursor += $unitWidth;
+        }
+
+        return [$advanceCursor, $offset < $length ? substr($text, $offset) : ''];
+    }
+
+    /**
+     * @return array{int, string}
+     *
+     * @throws Exception if splitting into grapheme clusters fails.
+     */
+    protected function writeMultibyteString(
+        array &$line,
+        int $col,
+        string $text,
+        ?int &$dirtyStart,
+        ?int &$dirtyEnd
+    ): array {
+        $units = $this->splitPrintableUnits($text);
+        $currentCol = $col;
+        $advanceCursor = 0;
+        $totalUnits = count($units);
+        $i = 0;
+
+        for ($i = 0; $i < $totalUnits; $i++) {
+            $unit = $units[$i];
+            $unitWidth = $unit === "\t" ? (8 - ($currentCol % 8)) : Grapheme::wcwidth($unit);
+
+            if ($currentCol + $unitWidth > $this->width) {
+                break;
+            }
+
+            $line[$currentCol] = $unit;
+            $this->touchDirtySpan($dirtyStart, $dirtyEnd, $currentCol, $currentCol + $unitWidth - 1);
+
             for ($j = 1; $j < $unitWidth; $j++) {
                 if (($currentCol + $j) < $this->width) {
-                    $this->buffer[$row][$currentCol + $j] = null;
+                    $line[$currentCol + $j] = null;
                 }
             }
 
             $currentCol += $unitWidth;
-
-            // Clear out any leftover continuation nulls
-            if (array_key_exists($currentCol, $this->buffer[$row]) && $this->buffer[$row][$currentCol] === null) {
-                $k = $currentCol;
-
-                while (array_key_exists($k, $this->buffer[$row]) && $this->buffer[$row][$k] === null) {
-                    $this->buffer[$row][$k] = ' ';
-                    $k++;
-                }
-            }
-
+            $this->clearTrailingContinuations($line, $currentCol, $dirtyStart, $dirtyEnd);
             $advanceCursor += $unitWidth;
         }
 
-        // The remainder is the unprocessed units joined back into a string.
-        $remainder = implode('', array_slice($units, $i));
+        return [$advanceCursor, implode('', array_slice($units, $i))];
+    }
 
-        // Mark this row as modified for differential rendering
-        $this->markLineDirty($row);
+    protected function clearTrailingContinuations(
+        array &$line,
+        int $currentCol,
+        ?int &$dirtyStart,
+        ?int &$dirtyEnd
+    ): void {
+        if (!array_key_exists($currentCol, $line) || $line[$currentCol] !== null) {
+            return;
+        }
 
-        return [$advanceCursor, $remainder];
+        $k = $currentCol;
+
+        while (array_key_exists($k, $line) && $line[$k] === null) {
+            $line[$k] = ' ';
+            $k++;
+        }
+
+        $this->touchDirtySpan($dirtyStart, $dirtyEnd, $currentCol, $k - 1);
+    }
+
+    protected function touchDirtySpan(?int &$dirtyStart, ?int &$dirtyEnd, int $startCol, int $endCol): void
+    {
+        if ($endCol < $startCol) {
+            return;
+        }
+
+        $dirtyStart = $dirtyStart === null ? $startCol : min($dirtyStart, $startCol);
+        $dirtyEnd = $dirtyEnd === null ? $endCol : max($dirtyEnd, $endCol);
     }
 
     /**
