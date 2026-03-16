@@ -23,6 +23,11 @@ jobs:
         run: |
           VERSION_RAW="${{ inputs.version }}"
 
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "Error: Releases must be created from the main branch. Current ref: $GITHUB_REF"
+            exit 1
+          fi
+
           if ! [[ "$VERSION_RAW" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "Error: Invalid version format '$VERSION_RAW'. Expected X.Y.Z or vX.Y.Z"
             exit 1
@@ -33,8 +38,70 @@ jobs:
           echo "normalized=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - name: Validate version state
+        run: |
+          VERSION="${{ steps.version.outputs.normalized }}"
+          TAG_NAME="${{ steps.version.outputs.tag }}"
+
+          if git rev-parse -q --verify "refs/tags/$TAG_NAME" >/dev/null; then
+            echo "Error: Tag $TAG_NAME already exists"
+            exit 1
+          fi
+
+          if grep -F -q "## [$VERSION]" CHANGELOG.md; then
+            echo "Error: CHANGELOG.md already contains a $VERSION section"
+            exit 1
+          fi
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          extensions: dom, curl, libxml, mbstring, zip, pcntl, pdo, sqlite, pdo_sqlite, bcmath, soap, intl, gd, exif, iconv, imagick
+          coverage: none
+          tools: composer:v2
+
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-interaction --no-progress
+
+      - name: Run tests
+        run: composer test
+
+      - name: Validate changelog (before creating tag)
+        run: |
+          chmod +x .github/scripts/parse-changelog.sh
+          .github/scripts/parse-changelog.sh validate
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Update changelog
+        run: |
+          VERSION="${{ steps.version.outputs.normalized }}"
+          .github/scripts/parse-changelog.sh release "$VERSION"
+
+      - name: Commit changelog update
+        run: |
+          VERSION="${{ steps.version.outputs.normalized }}"
+          git add CHANGELOG.md
+          git commit -m "Update changelog for v$VERSION"
+          git push origin HEAD:main
+
+      - name: Create and push tag
+        run: |
+          VERSION="${{ steps.version.outputs.normalized }}"
+          TAG_NAME="${{ steps.version.outputs.tag }}"
+
+          git tag -a "$TAG_NAME" -m "Release v$VERSION"
+          git push origin "$TAG_NAME"
 
       - name: Extract release notes from CHANGELOG
         id: changelog
@@ -59,16 +126,6 @@ jobs:
 
           # Write to file to preserve newlines
           echo "$NOTES" > release_notes.md
-
-      - name: Create and push tag
-        run: |
-          VERSION="${{ steps.version.outputs.normalized }}"
-          TAG_NAME="${{ steps.version.outputs.tag }}"
-
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "$TAG_NAME" -m "Release v$VERSION"
-          git push origin "$TAG_NAME"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
