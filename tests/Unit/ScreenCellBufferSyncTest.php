@@ -194,6 +194,31 @@ class ScreenCellBufferSyncTest extends TestCase
         $this->assertNull($buffer->getCell(0, 3)->extFg);
     }
 
+    #[Test]
+    public function to_cell_buffer_decodes_foreground_resets_without_leaking_previous_background(): void
+    {
+        $screen = new InstrumentedScreen(40, 1);
+
+        // Mirrors Solo's tab styling transitions where one tab is focused and
+        // the next is blurred.
+        $screen->write("\e[40m\e[32m•\e[39m\e[37mAbout \e[39m\e[49m \e[32m•\e[39m\e[90mLogs \e[39m");
+
+        $buffer = new CellBuffer(40, 1);
+        $screen->toCellBuffer($buffer);
+
+        $rowText = $this->rowText($buffer, 0);
+        $logsStart = strpos($rowText, 'Logs');
+
+        $this->assertNotFalse($logsStart);
+
+        foreach (range($logsStart, $logsStart + 3) as $index) {
+            $this->assertNull(
+                $buffer->getCell(0, $index)->bg,
+                "Expected no background on blurred tab cell {$index}."
+            );
+        }
+    }
+
     private function rowText(CellBuffer $buffer, int $row): string
     {
         return rtrim(implode('', array_map(
