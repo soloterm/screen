@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-03-16
+
 ### Added
 
 - **Cross-terminal testing** - Visual testing now supports multiple terminals (iTerm and Ghostty) with terminal-specific fixture directories
@@ -25,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Pending wrap terminal inconsistencies** - Different terminals handle full-width lines differently when using `\n`; new relative positioning approach eliminates this issue
 - **Missing fixture CI gating** - Tests now fail when PHPUnit output reports missing fixtures and always run fixture parity checks via `composer test:fixtures`
 - **Linux parity edge cases** - Added non-Darwin skip guards for two known multibyte visual/parity tests while keeping macOS as the validation environment for those cases
+
 
 ## [1.1.1] - 2025-12-14
 
@@ -80,3 +83,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Support for cursor movement, colors, styles, and screen clearing
 - Unicode and wide character support via Grapheme library
 - Visual testing system with screenshot comparison
+[1.1.2]: https://github.com/soloterm/screen/compare/v1.1.1...v1.1.2
