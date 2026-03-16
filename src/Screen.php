@@ -135,7 +135,7 @@ class Screen
     {
         $this->width = $width;
         $this->height = $height;
-        $this->cellBufferViewportState = new WeakMap();
+        $this->cellBufferViewportState = new WeakMap;
 
         $this->seqNoProvider = fn() => ++$this->seqNo;
         $this->initializeBuffers();
@@ -1627,8 +1627,7 @@ class Screen
         ?int $bg = null,
         ?array $extFg = null,
         ?array $extBg = null,
-    ): Cell
-    {
+    ): Cell {
         if ($style === null) {
             if (is_int($ansiCell)) {
                 $bits = $ansiCell;

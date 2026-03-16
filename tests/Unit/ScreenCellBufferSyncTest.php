@@ -206,6 +206,7 @@ class ScreenCellBufferSyncTest extends TestCase
 final class InstrumentedScreen extends Screen
 {
     public int $materializedRows = 0;
+
     public int $scannedColumns = 0;
 
     protected function materializeCellBufferRow(
